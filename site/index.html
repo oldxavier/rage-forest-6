@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rage Forest 6 Stats</title>
+  <meta name="description" content="Standings, records, awards and oddities from Rage Forest 6">
+  <meta property="og:title" content="Rage Forest 6 Stats">
+  <meta property="og:description" content="Standings, records, awards and oddities from Rage Forest 6">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://oldxavier.github.io/rage-forest-6/">
+  <link rel="stylesheet" href="assets/site.css?v=f8a6a78521">
+  <script src="assets/site.js?v=f8a6a78521" defer></script>
+  <script src="assets/replay.js?v=f8a6a78521" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header" id="top">
+    <nav aria-label="Primary">
+      <a class="brand" href="#top"><span>RF6</span> Rage Forest 6 Stats</a>
+      <div class="nav-links">
+        <a href="#groups">Groups</a>
+        <a href="#records">Records</a>
+        <a href="#players">Teams & players</a>
+        <a href="#civs">Civs</a>
+        <a href="#replays">Replays</a>
+        <a data-link="liquipedia" href="https://liquipedia.net/ageofempires/Rage_Forest/6">Liquipedia</a>
+      </div>
+    </nav>
+
+    <div class="hero">
+      <h1>Rage Forest 6</h1>
+      <div class="hero-actions">
+        <a class="button primary" href="#records">See the records</a>
+        <a class="button secondary" data-link="discord" href="https://discord.gg/PkvTNwy4vx">Join the Rage Forest Discord</a>
+      </div>
+    </div>
+
+    <div class="stats" id="summary" aria-label="Tournament summary">
+      <div><strong>–</strong><span>games captured</span></div>
+      <div><strong>–</strong><span>players</span></div>
+      <div><strong>–</strong><span>last update</span></div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="section band" id="groups" aria-labelledby="groups-title">
+      <div class="section-heading">
+        <div>
+          <p class="section-label">Group stage</p>
+          <h2 id="groups-title">Standings</h2>
+        </div>
+        <div class="heading-note">
+          <p>Swiss system over four rounds, every series played to three games. The top four of each group went to the playoffs: best of five, single elimination.</p>
+          <p class="small">Order: series won, then game difference, then games won head-to-head, then Median-Buchholz.</p>
+        </div>
+      </div>
+      <div class="group-grid" id="group-tables"></div>
+      <div class="bracket" id="bracket"></div>
+
+    </section>
+
+    <section class="section replays" id="replays" aria-labelledby="replay-title">
+      <div class="replay-head">
+        <div>
+          <p class="section-label">Replays</p>
+          <h2 class="replay-title" id="replay-title">Watch any game</h2>
+        </div>
+        <label class="replay-pick"><span>Game</span><select id="game-select"></select></label>
+      </div>
+      <div class="replay-layout">
+        <div class="replay-stage">
+          <canvas id="map" aria-label="Animated map of the game"></canvas>
+          <div class="replay-controls">
+            <button type="button" class="button primary" id="play">Play</button>
+            <div class="scope-switch" id="speed" role="group" aria-label="Speed"></div>
+            <input type="range" id="scrub" min="0" max="1" step="1" value="0" aria-label="Game time">
+            <span class="replay-clock" id="clock">0:00</span>
+          </div>
+        </div>
+        <aside class="replay-legend" id="legend" aria-label="Players"></aside>
+      </div>
+    </section>
+
+    <section class="section" id="records" aria-labelledby="records-title">
+      <div class="section-heading">
+        <div>
+          <p class="section-label">Leaderboards</p>
+          <h2 id="records-title">Records</h2>
+        </div>
+        <div class="heading-note"><p id="records-blurb">Single-game records unless a board says “all games”. Every entry names the game it came from.</p></div>
+      </div>
+      <div class="category-bar">
+        <div class="scope-switch" id="category-switch" role="tablist" aria-label="Record category"></div>
+      </div>
+      <p class="category-blurb" id="category-blurb"></p>
+      <div class="board-grid" id="boards"></div>
+    </section>
+
+    <section class="section band" id="players" aria-labelledby="players-title">
+      <div class="section-heading">
+        <div>
+          <p class="section-label">Every team and player</p>
+          <h2 id="players-title">Teams &amp; players</h2>
+        </div>
+        <div class="heading-note"><p>Team figures are the four players' totals per game. Player figures are totals and averages over each player's games, or only their flank or pocket games.</p></div>
+      </div>
+      <h3 class="table-title">Teams</h3>
+      <div class="table-shell team-shell">
+        <table class="player-table" id="team-table"><thead></thead><tbody></tbody></table>
+      </div>
+      <h3 class="table-title">Players</h3>
+      <div class="leader-controls">
+        <label><span>Find a player or team</span><input id="player-search" type="search" placeholder="e.g. Juyhou" autocomplete="off"></label>
+        <div><span class="control-label">Games played as</span><div class="scope-switch role-switch" role="group" aria-label="Player role"></div></div>
+      </div>
+      <p class="sort-help">Select a column heading to sort.</p>
+      <div class="table-shell">
+        <table class="player-table" id="player-table"><thead></thead><tbody><tr><td class="loading" colspan="12">Loading…</td></tr></tbody></table>
+      </div>
+    </section>
+
+    <section class="section" id="civs" aria-labelledby="civs-title">
+      <div class="two-column">
+        <div>
+          <p class="section-label">Civilizations</p>
+          <h2 id="civs-title">Who played what</h2>
+          <p class="heading-note">Picks, games won and units killed per civilization. With this few games a civ's record says more about who played it than about the civ.</p>
+        </div>
+        <div class="table-shell civ-shell">
+          <table class="civ-table" id="civ-table"><thead></thead><tbody></tbody></table>
+        </div>
+      </div>
+    </section>
+
+    <section class="section about" id="about" aria-labelledby="about-title">
+      <p class="section-label">About the numbers</p>
+      <h2 id="about-title">How this is made</h2>
+      <p class="about-copy">Every game's recording is replayed from start to finish in CaptureAge, which logs
+        every unit, building and death and each player's statistics as the game plays:
+        <b id="data-points">millions of data points</b> so far, and every leaderboard is recomputed from
+        all of them whenever a new series is added.</p>
+    </section>
+  </main>
+
+  <footer>
+    <span>Rage Forest 6 Stats · <a data-link="liquipedia" href="https://liquipedia.net/ageofempires/Rage_Forest/6">Liquipedia</a> · <a data-link="discord" href="https://discord.gg/PkvTNwy4vx">Rage Forest Discord</a> · <a href="https://oldxavier.github.io/rageforest-ratings/">Rage Forest Ratings</a></span>
+    <a href="#top">Back to top</a>
+  </footer>
+</body>
+</html>
