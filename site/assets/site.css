@@ -324,10 +324,10 @@ h3 { margin: 0 0 .65rem; font-size: 1.15rem; line-height: 1.3; }
 .seg button + button::before { content: none; }
 .seg button:hover, .seg button:focus-visible { color: var(--green); }
 .seg button[aria-pressed="true"] { color: var(--green); background: var(--green-soft); font-weight: 650; }
-.never { margin: .4rem 0 .6rem; padding: .7rem .8rem; border-radius: 4px; background: var(--green-soft); font-size: .8rem; }
-.never b { display: block; color: var(--green); }
-.never p, .never ul { margin: .2rem 0 0; padding: 0; color: var(--muted); list-style: none; }
-.never small { color: var(--muted); }
+.never { display: flex; flex-direction: column; margin-top: .2rem; }
+.board .never ol { margin: .3rem 0 0; }
+.board .never li { grid-template-columns: minmax(0, 1fr) auto; }
+.board .never li .val { font-size: .9rem; }
 .board.war { grid-column: 1 / -1; }
 .war-shell { max-height: 520px; margin-top: .6rem; }
 .war-table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: .84rem; }

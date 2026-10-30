@@ -238,6 +238,7 @@ function roleSwitches() {
 // each card keeps its own role and its own top / bottom choice
 const cardRole = {};
 const cardOpen = new Set();
+const neverOpen = new Set();
 
 function categories() {
   const sw = document.getElementById("category-switch");
@@ -265,8 +266,9 @@ function cardClick(e) {
   const id = card.dataset.id;
   if (btn.dataset.act === "role") cardRole[id] = btn.dataset.role;
   if (btn.dataset.act === "side") btn.dataset.side === "least" ? flipped.add(id) : flipped.delete(id);
-  const closing = btn.dataset.act === "more" && cardOpen.has(id);
-  if (btn.dataset.act === "more") closing ? cardOpen.delete(id) : cardOpen.add(id);
+  const toggled = { more: cardOpen, never: neverOpen }[btn.dataset.act];
+  const closing = toggled && toggled.has(id);
+  if (toggled) closing ? toggled.delete(id) : toggled.add(id);
   redrawCard(id, btn.dataset.act + (btn.dataset.role || btn.dataset.side || ""));
   if (closing) backToCard(id);
 }
@@ -343,13 +345,6 @@ function boardCard(b) {
       </li>`;
     })
     .join("");
-  // shown only once someone has actually skipped it
-  const skipped = (b.never || []).filter((x) => r === "all" || x.role === r);
-  const never = skipped.length
-    ? `<div class="never"><b>${esc(b.never_title)}</b><ul>${skipped
-        .map((x) => `<li>${esc(player(x.p))} <small>${civTag(x.civ)} · ${esc(gameLabel(x.g))}</small></li>`)
-        .join("")}</ul></div>`
-    : "";
   const note = side.note ?? b.note;
   const roleWord = { all: "", flank: "flank ", pocket: "pocket " }[r];
   return `<article class="board" id="board-${b.id}" data-id="${b.id}">
@@ -357,12 +352,35 @@ function boardCard(b) {
     <h3>${esc(side.title)}</h3>
     ${note ? `<p class="note">${esc(note)}</p>` : ""}
     ${controls(b, r)}
-    ${never}
     ${rows.length ? `<ol>${items}</ol>` : `<p class="empty">No ${roleWord}games yet.</p>`}
     ${rows.length > ROWS_SHOWN
       ? `<button type="button" class="more" data-act="more" aria-expanded="${open}">${open ? "Show top 5" : `Show top ${rows.length}`}</button>`
       : ""}
+    ${neverList(b, r)}
   </article>`;
+}
+
+// the players who skipped something altogether: one line under the list, opening to each player's games,
+// shown only once someone has actually skipped it
+function neverList(b, r) {
+  const skipped = (b.never || []).filter((x) => r === "all" || x.role === r);
+  if (!skipped.length) return "";
+  const open = neverOpen.has(b.id);
+  const byPlayer = new Map();
+  skipped.forEach((x) => byPlayer.set(x.p, [...(byPlayer.get(x.p) || []), x]));
+  const items = [...byPlayer.values()]
+    .sort((a, c) => c.length - a.length || player(a[0].p).localeCompare(player(c[0].p)))
+    .map((games) => `<li>
+        <span class="who"><span class="main">${esc(player(games[0].p))}</span>${games
+          .map((x) => `<small>${civTag(x.civ)} · ${esc(gameLabel(x.g))}</small>`)
+          .join("")}</span>
+        <span class="val">${games.length}</span>
+      </li>`)
+    .join("");
+  return `<div class="never">
+    <button type="button" class="more" data-act="never" aria-expanded="${open}">${esc(b.never_title)}: ${skipped.length} game${skipped.length === 1 ? "" : "s"}</button>
+    ${open ? `<ol>${items}</ol>` : ""}
+  </div>`;
 }
 
 function showCategory() {
