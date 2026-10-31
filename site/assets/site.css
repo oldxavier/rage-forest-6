@@ -324,10 +324,55 @@ h3 { margin: 0 0 .65rem; font-size: 1.15rem; line-height: 1.3; }
 .seg button + button::before { content: none; }
 .seg button:hover, .seg button:focus-visible { color: var(--green); }
 .seg button[aria-pressed="true"] { color: var(--green); background: var(--green-soft); font-weight: 650; }
-.never { display: flex; flex-direction: column; margin-top: .2rem; }
-.board .never ol { margin: .3rem 0 0; }
-.board .never li { grid-template-columns: minmax(0, 1fr) auto; }
-.board .never li .val { font-size: .9rem; }
+.card-controls { position: relative; }
+.card-controls .flip, .civ-btn {
+  padding: .15rem .45rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--muted);
+  background: none;
+  font-size: .74rem;
+  cursor: pointer;
+}
+.civ-btn::after { content: " \25BE"; }
+.card-controls .flip:hover, .civ-btn:hover { color: var(--green); }
+.card-controls .flip[aria-pressed="true"], .civ-btn.on { border-color: var(--green); color: var(--green); background: var(--green-soft); font-weight: 650; }
+/* a card's civ list: only the civs on that card, opened from its button */
+.civ-filter { position: relative; }
+.civ-pop {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + .3rem);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(17rem, 80vw);
+  max-height: 21rem;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--white);
+  box-shadow: 0 10px 30px rgb(0 0 0 / .14);
+}
+.civ-filter .civ-pop { right: auto; left: 0; }
+.civ-pop-head { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .5rem; padding: .5rem .6rem; border-bottom: 1px solid var(--line); }
+.civ-pop-head .civ-clear { margin-left: auto; padding: .15rem .3rem; border: 0; color: var(--green); background: none; font-size: .74rem; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.civ-pop-head .civ-clear:disabled { color: var(--muted); text-decoration: none; cursor: default; opacity: .6; }
+.civ-pop-head .civ-close { padding: 0 .3rem; border: 0; color: var(--muted); background: none; font-size: 1.1rem; line-height: 1; cursor: pointer; }
+.civ-list { margin: 0; padding: .3rem 0; overflow-y: auto; overscroll-behavior: contain; list-style: none; }
+.civ-list label { display: flex; align-items: center; gap: .45rem; padding: .28rem .7rem; font-size: .82rem; cursor: pointer; }
+.civ-list label:hover { background: var(--green-soft); }
+.civ-list input { margin: 0; accent-color: var(--green); }
+/* the card's own list rows style does not reach into the civ list */
+.board .civ-list li { display: block; padding: 0; border: 0; box-shadow: none; }
+@media (max-width: 600px) {
+  /* on a phone the civ list is a panel along the bottom of the screen */
+  .civ-pop, .civ-filter .civ-pop {
+    position: fixed;
+    inset: auto .75rem calc(.75rem + env(safe-area-inset-bottom, 0px)) .75rem;
+    width: auto;
+    max-height: 60vh;
+  }
+}
 .board.war { grid-column: 1 / -1; }
 .war-shell { max-height: 520px; margin-top: .6rem; }
 .war-table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: .84rem; }
@@ -371,19 +416,8 @@ details.minor > .board-grid { margin-top: .4rem; }
 .board li .who .emblem { margin-right: .25rem; vertical-align: -.2rem; }
 .board li .val { color: var(--green); font: 500 .9rem var(--mono); text-align: right; white-space: nowrap; }
 .board li:first-child .val { font-size: 1.05rem; }
-.board li.extra { display: none; }
-.board .more {
-  align-self: flex-start;
-  margin-top: .5rem;
-  padding: .3rem 0;
-  border: 0;
-  color: var(--green);
-  background: none;
-  font-size: .78rem;
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
+/* the whole list, scrolling inside the card, so every card keeps its size */
+.board .board-list { max-height: 18.5rem; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 
 /* tables */
 .leader-controls { display: flex; flex-wrap: wrap; align-items: end; gap: .8rem 1.4rem; }

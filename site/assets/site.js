@@ -1,16 +1,16 @@
 // Renders the whole page from data/stats.json, which is regenerated whenever new games are added.
-const ROWS_SHOWN = 5;
 const ROLES = [["all", "All"], ["flank", "Flank"], ["pocket", "Pocket"]];
 
 let D, gamesById, category, role = "all";   // role: the players table's filter
-const flipped = new Set();          // boards showing their "least" side
-const refresh = [];                 // redraws that depend on the players table's role
+let PG;                             // every player in every game: who, which game, civ, role, won
+const refresh = [];                 // redraws that depend on the players table's role or civs
 
 fetch("data/stats.json", { cache: "no-cache" })
   .then((r) => r.json())
   .then((data) => {
     D = data;
     gamesById = Object.fromEntries(D.games.map((g) => [g.tag, g]));
+    PG = D.pg.map(([p, g, civ, role, w]) => ({ p, g, civ, role, w: !!w }));
     links();
     summary();
     groups();
@@ -235,10 +235,17 @@ function roleSwitches() {
 
 // ---------------------------------------------------------------- records
 
-// each card keeps its own role and its own top / bottom choice
+// Every board ships its whole ranked list. Each card keeps its own role, civs and direction, and
+// shows the rows that match, scrolling; a row's player-game says who, which game, civ and role.
 const cardRole = {};
-const cardOpen = new Set();
-const neverOpen = new Set();
+const cardCivs = {};               // card id -> {mode: "only" | "except", civs: Set}
+const cardFlip = new Set();        // cards showing the other end of their list
+let civPop = null;                 // the card (or "players") whose civ list is open
+const views = {};                  // card id -> the rows it shows now, and how many are drawn
+const FIRST_DRAWN = 40, MORE_DRAWN = 80;
+
+const roleOk = (r, role) => r === "all" || role === r;
+const civOk = (sel, civ) => !sel || !sel.civs.size || (sel.mode === "only") === sel.civs.has(civ);
 
 function categories() {
   const sw = document.getElementById("category-switch");
@@ -252,50 +259,90 @@ function categories() {
     if (!btn) return;
     sw.querySelectorAll("button").forEach((b) => b.setAttribute("aria-selected", b === btn));
     category = btn.dataset.cat;
+    civPop = null;
     showCategory();
   });
-  document.getElementById("boards").addEventListener("click", cardClick);
+  const boards = document.getElementById("boards");
+  boards.addEventListener("click", cardClick);
+  boards.addEventListener("change", civTicked);
+  boards.addEventListener("scroll", drawMore, true);    // scroll does not bubble; listen as it goes down
+  document.addEventListener("click", closeCivsOutside);
+  document.addEventListener("keydown", (e) => e.key === "Escape" && civPop && closeCivs(true));
   category = cats[0].id;
   showCategory();
 }
 
-function cardClick(e) {
-  const btn = e.target.closest("button[data-act]");
-  const card = btn && btn.closest(".board");
-  if (!card) return;
-  const id = card.dataset.id;
-  if (btn.dataset.act === "role") cardRole[id] = btn.dataset.role;
-  if (btn.dataset.act === "side") btn.dataset.side === "least" ? flipped.add(id) : flipped.delete(id);
-  const toggled = { more: cardOpen, never: neverOpen }[btn.dataset.act];
-  const closing = toggled && toggled.has(id);
-  if (toggled) closing ? toggled.delete(id) : toggled.add(id);
-  redrawCard(id, btn.dataset.act + (btn.dataset.role || btn.dataset.side || ""));
-  if (closing) backToCard(id);
+// ---- which rows a card shows
+
+const decoded = new Map();          // a board's shipped rows -> the same rows as objects, made once
+function rowsOf(b, rows) {
+  if (!decoded.has(rows))
+    decoded.set(rows, b.scope === "match"
+      ? rows.map(([g, v]) => ({ g, v }))
+      : rows.map(([i, v, d, txt, o]) => ({ ...PG[i], v, d, txt, o })));
+  return decoded.get(rows);
 }
 
-// after a long list closes, bring the card's top back into view below the category tabs
-function backToCard(id) {
-  const below = document.querySelector(".category-bar").getBoundingClientRect().height + 12;
-  const top = document.getElementById(`board-${id}`).getBoundingClientRect().top;
-  if (top < below) {
-    const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    window.scrollTo({ top: window.scrollY + top - below, behavior: smooth ? "smooth" : "auto" });
+// each player's total (or average) over the games in view, ranked
+function playerTotals(spec, r, sel, asc) {
+  const inView = (x) => roleOk(r, x.role) && civOk(sel, x.civ);
+  const played = new Map();
+  for (const x of PG) if (inView(x)) played.set(x.p, (played.get(x.p) || 0) + 1);
+  const acc = new Map();
+  for (const [i, v, parts] of spec.vals) {
+    if (!inView(PG[i])) continue;
+    const a = acc.get(PG[i].p) || { sum: 0, n: 0, parts: [] };
+    a.sum += v;
+    a.n += 1;
+    if (parts !== undefined) a.parts.push(parts);
+    acc.set(PG[i].p, a);
   }
+  const out = [];
+  for (const [p, a] of acc) {
+    const n = spec.agg.avg ? a.n : played.get(p);
+    if (n < spec.agg.min) continue;
+    out.push({ p, n, v: Math.round(((spec.agg.avg ? a.sum / a.n : a.sum) * 100)) / 100, d: totalsDetail(spec.agg.detail, a.parts) });
+  }
+  return out.sort((x, y) => (asc ? x.v - y.v : y.v - x.v));
 }
 
-function redrawCard(id, focus) {
-  const old = document.getElementById(`board-${id}`);
-  const b = D.boards.list.find((x) => x.id === id);
-  const box = document.createElement("div");
-  box.innerHTML = boardCard(b);
-  old.replaceWith(box.firstElementChild);
-  if (b.scope === "war") warTable();
-  if (b.scope === "units") unitsTable();
-  const target = [...document.querySelectorAll(`#board-${id} button[data-act]`)].find(
-    (x) => x.dataset.act + (x.dataset.role || x.dataset.side || "") === focus
-  );
-  if (target) target.focus();
+// "2× Wolf, 1× Boar" from counts, or "3 own, 1 allied" from named numbers
+function totalsDetail(kind, parts) {
+  if (!kind || !parts.length) return null;
+  if (kind === "counter") {
+    const count = new Map();
+    for (const part of parts) for (const [k, n] of Object.entries(part)) count.set(k, (count.get(k) || 0) + n);
+    const items = [...count].filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
+    return items.length ? items.map(([k, n]) => `${n}× ${k}`).join(", ") : null;
+  }
+  return kind.map((label, j) => `${Math.round(parts.reduce((s, p) => s + p[j], 0))} ${label}`).join(", ");
 }
+
+function cardRows(b) {
+  const r = cardRole[b.id] || "all", sel = cardCivs[b.id], flip = cardFlip.has(b.id);
+  const side = flip && b.least ? b.least : b;
+  let rows = side.rows.agg
+    ? playerTotals(side.rows, r, sel, side.asc ?? b.asc)
+    : rowsOf(b, side.rows).filter((x) => b.scope === "match" || (roleOk(r, x.role) && civOk(sel, x.civ)));
+  if (flip && !b.least) rows = rows.slice().reverse();
+  if (b.cap) rows = rows.slice(0, b.cap);
+  return { side, rows };
+}
+
+// the civs a card's rows come from, for its civ list
+function civsOf(b) {
+  const civs = new Set();
+  const add = (rows) => {
+    if (!rows) return;
+    if (rows.agg) rows.vals.forEach(([i]) => civs.add(PG[i].civ));
+    else rowsOf(b, rows).forEach((x) => civs.add(x.civ));
+  };
+  if (b.scope === "war") D.war.forEach((x) => civs.add(x.civ));
+  else add(b.rows), b.least && add(b.least.rows);
+  return [...civs].sort((a, c) => a.localeCompare(c));
+}
+
+// ---- drawing a card
 
 // a row: the name (with the civ beside it), then one short line each for the game and any detail
 function who(b, r) {
@@ -308,79 +355,158 @@ function who(b, r) {
 }
 
 const SCOPES = { game: "One game", player: "All games", object: "One unit or building, one game", match: "Whole game" };
+const CIV_SCOPES = new Set(["game", "player", "object", "war"]);
 
 function controls(b, r) {
   const roles = b.scope === "match" ? "" : `<span class="seg" role="group" aria-label="Player role">${ROLES.map(
     ([k, l]) => `<button type="button" data-act="role" data-role="${k}" aria-pressed="${k === r}">${l}</button>`
   ).join("")}</span>`;
-  const least = flipped.has(b.id);
-  const sides = b.least
-    ? `<span class="seg" role="group" aria-label="Order">${[["top", b.label, !least], ["least", b.least.label, least]]
+  const flip = cardFlip.has(b.id);
+  const order = b.least
+    ? `<span class="seg" role="group" aria-label="Order">${[["top", b.label, !flip], ["least", b.least.label, flip]]
         .map(([k, l, on]) => `<button type="button" data-act="side" data-side="${k}" aria-pressed="${on}">${esc(l)}</button>`)
         .join("")}</span>`
-    : "";
-  return roles || sides ? `<div class="card-controls">${roles}${sides}</div>` : "";
+    : b.cap || b.scope === "war" || b.scope === "units"
+      ? ""
+      : `<button type="button" class="flip" data-act="flip" aria-pressed="${flip}" title="Turn the list round">Reverse</button>`;
+  const civs = CIV_SCOPES.has(b.scope) ? civButton(b.id) + (civPop === b.id ? civPopup(b.id, civsOf(b)) : "") : "";
+  return roles || order || civs ? `<div class="card-controls">${roles}${order}${civs}</div>` : "";
+}
+
+function civButton(id) {
+  const sel = cardCivs[id], n = sel ? sel.civs.size : 0;
+  const named = n === 1 ? [...sel.civs][0] : `${n} civs`;
+  const label = !n ? "All civs" : sel.mode === "only" ? named : `All but ${named}`;
+  return `<button type="button" class="civ-btn${n ? " on" : ""}" data-act="civs" aria-haspopup="dialog" aria-expanded="${civPop === id}">${esc(label)}</button>`;
+}
+
+function civPopup(id, civs) {
+  const sel = cardCivs[id] || { mode: "only", civs: new Set() };
+  return `<div class="civ-pop" role="dialog" aria-label="Choose civs">
+    <div class="civ-pop-head">
+      <span class="seg" role="group" aria-label="Show">${[["only", "Only these"], ["except", "All but these"]]
+        .map(([m, l]) => `<button type="button" data-act="civmode" data-mode="${m}" aria-pressed="${sel.mode === m}">${l}</button>`)
+        .join("")}</span>
+      <button type="button" class="civ-clear" data-act="civclear"${sel.civs.size ? "" : " disabled"}>Clear</button>
+      <button type="button" class="civ-close" data-act="civclose" aria-label="Close">×</button>
+    </div>
+    <ul class="civ-list">${civs
+      .map((c) => `<li><label><input type="checkbox" data-civ="${esc(c)}"${sel.civs.has(c) ? " checked" : ""}>${emblem(c)}<span>${esc(c)}</span></label></li>`)
+      .join("")}</ul>
+  </div>`;
 }
 
 function boardCard(b) {
   const r = cardRole[b.id] || "all";
   if (b.scope === "war") return warCard(b, r);
   if (b.scope === "units") return unitsCard(b, r);
-  const least = flipped.has(b.id) && b.least;
-  const side = least ? b.least : b;
-  const rows = side.rows[r] || [];
-  const open = cardOpen.has(b.id);
-  const items = rows
-    .map((x, i) => {
-      const w = who(b, x);
-      const rank = rows.findIndex((y) => y.v === x.v) + 1;      // ties share a rank
-      const result = x.w === undefined ? "" : x.w ? "won" : "lost";
-      return `<li class="${i >= ROWS_SHOWN && !open ? "extra" : ""} ${result}">
-        <span class="rank">${rank}</span>
-        <span class="who"><span class="main" title="${esc(w.main)}${aliasNote(x.p)}">${esc(w.main)}${w.civ ? ` ${civTag(w.civ)}` : ""}</span>${w.lines
-          .filter(Boolean)
-          .map((l) => `<small>${l}</small>`)
-          .join("")}</span>
-        <span class="val">${x.txt ? esc(x.txt) : value(x.v, b.fmt)}</span>
-      </li>`;
-    })
-    .join("");
+  const { side, rows } = cardRows(b);
+  views[b.id] = { b, rows, drawn: Math.min(rows.length, FIRST_DRAWN) };
   const note = side.note ?? b.note;
-  const roleWord = { all: "", flank: "flank ", pocket: "pocket " }[r];
   return `<article class="board" id="board-${b.id}" data-id="${b.id}">
     <div class="board-top"><span class="scope">${SCOPES[b.scope]}</span></div>
     <h3>${esc(side.title)}</h3>
     ${note ? `<p class="note">${esc(note)}</p>` : ""}
     ${controls(b, r)}
-    ${rows.length ? `<ol>${items}</ol>` : `<p class="empty">No ${roleWord}games yet.</p>`}
-    ${rows.length > ROWS_SHOWN
-      ? `<button type="button" class="more" data-act="more" aria-expanded="${open}">${open ? "Show top 5" : `Show top ${rows.length}`}</button>`
-      : ""}
-    ${neverList(b, r)}
+    ${rows.length ? `<ol class="board-list" data-id="${b.id}">${rowsHtml(b, rows, 0, views[b.id].drawn)}</ol>` : `<p class="empty">${emptyText(b, r)}</p>`}
   </article>`;
 }
 
-// the players who skipped something altogether: one line under the list, opening to each player's games,
-// shown only once someone has actually skipped it
-function neverList(b, r) {
-  const skipped = (b.never || []).filter((x) => r === "all" || x.role === r);
-  if (!skipped.length) return "";
-  const open = neverOpen.has(b.id);
-  const byPlayer = new Map();
-  skipped.forEach((x) => byPlayer.set(x.p, [...(byPlayer.get(x.p) || []), x]));
-  const items = [...byPlayer.values()]
-    .sort((a, c) => c.length - a.length || player(a[0].p).localeCompare(player(c[0].p)))
-    .map((games) => `<li>
-        <span class="who"><span class="main">${esc(player(games[0].p))}</span>${games
-          .map((x) => `<small>${civTag(x.civ)} · ${esc(gameLabel(x.g))}</small>`)
-          .join("")}</span>
-        <span class="val">${games.length}</span>
-      </li>`)
-    .join("");
-  return `<div class="never">
-    <button type="button" class="more" data-act="never" aria-expanded="${open}">${esc(b.never_title)}: ${skipped.length} game${skipped.length === 1 ? "" : "s"}</button>
-    ${open ? `<ol>${items}</ol>` : ""}
-  </div>`;
+function emptyText(b, r) {
+  const sel = cardCivs[b.id];
+  if (sel && sel.civs.size) return `Nothing for ${sel.mode === "only" ? "these civs" : "the other civs"}${r === "all" ? "" : ` as ${r}`}.`;
+  return `No ${r === "all" ? "" : r + " "}games yet.`;
+}
+
+// ties share a rank
+function rowsHtml(b, rows, from, to) {
+  let out = "";
+  for (let i = from; i < to; i++) {
+    const x = rows[i];
+    let rank = i + 1;
+    while (rank > 1 && rows[rank - 2].v === x.v && rows[rank - 2].txt === x.txt) rank--;
+    const w = who(b, x);
+    const result = x.w === undefined ? "" : x.w ? "won" : "lost";
+    out += `<li class="${result}">
+      <span class="rank">${rank}</span>
+      <span class="who"><span class="main" title="${esc(w.main)}${aliasNote(x.p)}">${esc(w.main)}${w.civ ? ` ${civTag(w.civ)}` : ""}</span>${w.lines
+        .filter(Boolean)
+        .map((l) => `<small>${l}</small>`)
+        .join("")}</span>
+      <span class="val">${x.txt ? esc(x.txt) : value(x.v, b.fmt)}</span>
+    </li>`;
+  }
+  return out;
+}
+
+// a long list is drawn as it is scrolled
+function drawMore(e) {
+  const ol = e.target;
+  if (!ol.classList || !ol.classList.contains("board-list")) return;
+  const v = views[ol.dataset.id];
+  if (!v || v.drawn >= v.rows.length || ol.scrollTop + ol.clientHeight < ol.scrollHeight - 400) return;
+  const to = Math.min(v.rows.length, v.drawn + MORE_DRAWN);
+  ol.insertAdjacentHTML("beforeend", rowsHtml(v.b, v.rows, v.drawn, to));
+  v.drawn = to;
+}
+
+// ---- the card's buttons
+
+function cardClick(e) {
+  const btn = e.target.closest("button[data-act]");
+  const card = btn && btn.closest(".board");
+  if (!card) return;
+  const id = card.dataset.id, act = btn.dataset.act;
+  if (act === "role") cardRole[id] = btn.dataset.role;
+  if (act === "side") btn.dataset.side === "least" ? cardFlip.add(id) : cardFlip.delete(id);
+  if (act === "flip") cardFlip.has(id) ? cardFlip.delete(id) : cardFlip.add(id);
+  if (act === "civs") civPop = civPop === id ? null : id;
+  if (act === "civmode") (cardCivs[id] ||= { mode: "only", civs: new Set() }).mode = btn.dataset.mode;
+  if (act === "civclear") delete cardCivs[id];
+  if (act === "civclose") civPop = null;
+  const focus = act === "civs" && civPop === id ? ".civ-pop input"
+    : act === "civclose" ? '[data-act="civs"]'
+    : `[data-act="${act}"]${btn.dataset.role ? `[data-role="${btn.dataset.role}"]` : ""}${btn.dataset.side ? `[data-side="${btn.dataset.side}"]` : ""}${btn.dataset.mode ? `[data-mode="${btn.dataset.mode}"]` : ""}`;
+  redraw(id, focus);
+}
+
+function civTicked(e) {
+  const box = e.target.closest("input[data-civ]");
+  const card = box && box.closest(".board");
+  if (!card) return;
+  const sel = (cardCivs[card.dataset.id] ||= { mode: "only", civs: new Set() });
+  box.checked ? sel.civs.add(box.dataset.civ) : sel.civs.delete(box.dataset.civ);
+  redraw(card.dataset.id, `input[data-civ="${CSS.escape(box.dataset.civ)}"]`);
+}
+
+function closeCivsOutside(e) {
+  if (civPop && !e.target.closest(".civ-pop") && !e.target.closest('[data-act="civs"]')) closeCivs(false);
+}
+
+function closeCivs(refocus) {
+  const id = civPop;
+  civPop = null;
+  if (id === "players") return playerCivs(refocus ? '[data-act="civs"]' : null);
+  if (document.getElementById(`board-${id}`)) redraw(id, refocus ? '[data-act="civs"]' : null);
+}
+
+// redraw one card in place, keeping the civ list where it was scrolled and the focus on the button pressed
+function redraw(id, focus) {
+  if (id === "players") return playerCivs(focus);
+  const old = document.getElementById(`board-${id}`);
+  const list = old.querySelector(".civ-list");
+  const scrolled = list ? list.scrollTop : 0;
+  const b = D.boards.list.find((x) => x.id === id);
+  const box = document.createElement("div");
+  box.innerHTML = boardCard(b);
+  old.replaceWith(box.firstElementChild);
+  if (b.scope === "war") warTable();
+  if (b.scope === "units") unitsTable();
+  const card = document.getElementById(`board-${id}`);
+  const newList = card.querySelector(".civ-list");
+  if (newList) newList.scrollTop = scrolled;
+  const target = focus && card.querySelector(focus);
+  if (target) target.focus({ preventScroll: true });
 }
 
 function showCategory() {
@@ -434,7 +560,7 @@ function warCard(b, r) {
 
 function warTable() {
   const r = cardRole.dark_age_war || "all";
-  const rows = D.war.filter((x) => r === "all" || x.role === r);
+  const rows = D.war.filter((x) => roleOk(r, x.role) && civOk(cardCivs.dark_age_war, x.civ));
   const cols = [
     { key: "name", label: "Player", cls: "name", html: (r) => `<span title="${esc(player(r.p))}${aliasNote(r.p)}">${esc(player(r.p))}</span><small>${civTag(r.civ)} · ${esc(gameLabel(r.g))}</small>`, sort: (r) => player(r.p).toLowerCase(), asc: true },
     { key: "vs", label: "Against", cls: "team", html: (r) => r.vs.map((p) => esc(player(p))).join(", "), sort: (r) => player(r.vs[0]).toLowerCase(), asc: true },
@@ -538,8 +664,64 @@ function playerTable() {
     { key: "res", label: "Res / game", text: (r) => value(r.res), sort: (r) => r.res },
     { key: "walls", label: "Walls / game", text: (r) => value(r.walls), sort: (r) => r.walls },
   ];
-  const update = sortable("player-table", cols, D.players[role], "kills", "player-search");
-  refresh.push(() => update(D.players[role]));
+  const update = sortable("player-table", cols, playerRows(), "kills", "player-search");
+  refresh.push(() => update(playerRows()));
+  const box = document.getElementById("players-civs");
+  box.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-act]");
+    if (!btn) return;
+    const act = btn.dataset.act;
+    if (act === "civs") civPop = civPop === "players" ? null : "players";
+    if (act === "civmode") (cardCivs.players ||= { mode: "only", civs: new Set() }).mode = btn.dataset.mode;
+    if (act === "civclear") delete cardCivs.players;
+    if (act === "civclose") civPop = null;
+    playerCivs(act === "civs" && civPop ? ".civ-pop input" : act === "civclose" ? '[data-act="civs"]' : `[data-act="${act}"]${btn.dataset.mode ? `[data-mode="${btn.dataset.mode}"]` : ""}`);
+  });
+  box.addEventListener("change", (e) => {
+    const civ = e.target.dataset.civ;
+    if (!civ) return;
+    const sel = (cardCivs.players ||= { mode: "only", civs: new Set() });
+    e.target.checked ? sel.civs.add(civ) : sel.civs.delete(civ);
+    playerCivs(`input[data-civ="${CSS.escape(civ)}"]`);
+  });
+  playerCivs();
+}
+
+// the players table's civ button and list, and the table under them
+function playerCivs(focus) {
+  const box = document.getElementById("players-civs");
+  const list = box.querySelector(".civ-list");
+  const scrolled = list ? list.scrollTop : 0;
+  const civs = [...new Set(PG.map((x) => x.civ))].sort((a, c) => a.localeCompare(c));
+  box.innerHTML = civButton("players") + (civPop === "players" ? civPopup("players", civs) : "");
+  const newList = box.querySelector(".civ-list");
+  if (newList) newList.scrollTop = scrolled;
+  const target = focus && box.querySelector(focus);
+  if (target) target.focus({ preventScroll: true });
+  refresh.forEach((f) => f());
+}
+
+// each player's totals and averages over their games in view (role and civs)
+function playerRows() {
+  const sel = cardCivs.players, col = D.pg_stats, games = new Map();
+  PG.forEach((x, i) => {
+    if (roleOk(role, x.role) && civOk(sel, x.civ)) games.set(x.p, [...(games.get(x.p) || []), i]);
+  });
+  return [...games].map(([p, idx]) => {
+    const avg = (c) => {
+      const v = idx.map((i) => col[c][i]).filter((x) => x != null);
+      return v.length ? Math.round((v.reduce((a, b) => a + b, 0) / v.length) * 10) / 10 : null;
+    };
+    const tot = (c) => Math.round(idx.reduce((s, i) => s + (col[c][i] || 0), 0));
+    const kills = tot("unit_kills"), deaths = tot("unit_deaths");
+    return {
+      p, team: D.people[p].team, games: idx.length, wins: idx.filter((i) => PG[i].w).length,
+      flank: idx.filter((i) => PG[i].role === "flank").length, pocket: idx.filter((i) => PG[i].role === "pocket").length,
+      kills, deaths, kd: Math.round((kills / Math.max(deaths, 1)) * 100) / 100,
+      eapm: avg("total_real_eapgm"), feudal: avg("feudal"), castle: avg("castle"), imperial: avg("imperial"),
+      idle_feudal: avg("idle_feudal"), idle_castle: avg("idle_castle"), res: avg("total_collected_res"), walls: avg("walls"),
+    };
+  });
 }
 
 function teamTable() {
