@@ -9,9 +9,9 @@
   <meta property="og:description" content="Standings, records, awards and oddities from Rage Forest 6">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://oldxavier.github.io/rage-forest-6/">
-  <link rel="stylesheet" href="assets/site.css?v=1eca659216">
-  <script src="assets/site.js?v=1eca659216" defer></script>
-  <script src="assets/replay.js?v=1eca659216" defer></script>
+  <link rel="stylesheet" href="assets/site.css?v=2b9add454c">
+  <script src="assets/site.js?v=2b9add454c" defer></script>
+  <script src="assets/replay.js?v=2b9add454c" defer></script>
   <script data-goatcounter="https://oldxavier.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
   <script>navigator.webdriver || fetch("https://oldxavier-sites.pages.dev/v?p=" + encodeURIComponent(location.pathname), {method: "POST", mode: "no-cors", keepalive: true}).catch(() => {});</script>
 </head>
@@ -60,28 +60,6 @@
       <div class="group-grid" id="group-tables"></div>
       <div class="bracket" id="bracket"></div>
 
-    </section>
-
-    <section class="section replays" id="replays" aria-labelledby="replay-title">
-      <div class="replay-head">
-        <div>
-          <p class="section-label">Replays</p>
-          <h2 class="replay-title" id="replay-title">Watch any game</h2>
-        </div>
-        <label class="replay-pick"><span>Game</span><select id="game-select"></select></label>
-      </div>
-      <div class="replay-layout">
-        <div class="replay-stage">
-          <canvas id="map" aria-label="Animated map of the game"></canvas>
-          <div class="replay-controls">
-            <button type="button" class="button primary" id="play">Play</button>
-            <div class="scope-switch" id="speed" role="group" aria-label="Speed"></div>
-            <input type="range" id="scrub" min="0" max="1" step="1" value="0" aria-label="Game time">
-            <span class="replay-clock" id="clock">0:00</span>
-          </div>
-        </div>
-        <aside class="replay-legend" id="legend" aria-label="Players"></aside>
-      </div>
     </section>
 
     <section class="section" id="records" aria-labelledby="records-title">
@@ -133,6 +111,28 @@
         <div class="table-shell civ-shell">
           <table class="civ-table" id="civ-table"><thead></thead><tbody></tbody></table>
         </div>
+      </div>
+    </section>
+
+    <section class="section replays" id="replays" aria-labelledby="replay-title">
+      <div class="replay-head">
+        <div>
+          <p class="section-label">Replays</p>
+          <h2 class="replay-title" id="replay-title">Watch any game</h2>
+        </div>
+        <label class="replay-pick"><span>Game</span><select id="game-select"></select></label>
+      </div>
+      <div class="replay-layout">
+        <div class="replay-stage">
+          <canvas id="map" aria-label="Animated map of the game"></canvas>
+          <div class="replay-controls">
+            <button type="button" class="button primary" id="play">Play</button>
+            <div class="scope-switch" id="speed" role="group" aria-label="Speed"></div>
+            <input type="range" id="scrub" min="0" max="1" step="1" value="0" aria-label="Game time">
+            <span class="replay-clock" id="clock">0:00</span>
+          </div>
+        </div>
+        <aside class="replay-legend" id="legend" aria-label="Players"></aside>
       </div>
     </section>
 

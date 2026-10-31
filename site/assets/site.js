@@ -376,7 +376,7 @@ function controls(b, r) {
 function civButton(id) {
   const sel = cardCivs[id], n = sel ? sel.civs.size : 0;
   const named = n === 1 ? [...sel.civs][0] : `${n} civs`;
-  const label = !n ? "All civs" : sel.mode === "only" ? named : `All but ${named}`;
+  const label = !n ? "All civs" : sel.mode === "only" ? named : `Exclude ${named}`;
   return `<button type="button" class="civ-btn${n ? " on" : ""}" data-act="civs" aria-haspopup="dialog" aria-expanded="${civPop === id}">${esc(label)}</button>`;
 }
 
@@ -384,7 +384,7 @@ function civPopup(id, civs) {
   const sel = cardCivs[id] || { mode: "only", civs: new Set() };
   return `<div class="civ-pop" role="dialog" aria-label="Choose civs">
     <div class="civ-pop-head">
-      <span class="seg" role="group" aria-label="Show">${[["only", "Only these"], ["except", "All but these"]]
+      <span class="seg" role="group" aria-label="Show">${[["only", "Include"], ["except", "Exclude"]]
         .map(([m, l]) => `<button type="button" data-act="civmode" data-mode="${m}" aria-pressed="${sel.mode === m}">${l}</button>`)
         .join("")}</span>
       <button type="button" class="civ-clear" data-act="civclear"${sel.civs.size ? "" : " disabled"}>Clear</button>
@@ -414,7 +414,7 @@ function boardCard(b) {
 
 function emptyText(b, r) {
   const sel = cardCivs[b.id];
-  if (sel && sel.civs.size) return `Nothing for ${sel.mode === "only" ? "these civs" : "the other civs"}${r === "all" ? "" : ` as ${r}`}.`;
+  if (sel && sel.civs.size) return `Nothing for ${sel.mode === "only" ? "the civs included" : "the civs left"}${r === "all" ? "" : ` as ${r}`}.`;
   return `No ${r === "all" ? "" : r + " "}games yet.`;
 }
 
