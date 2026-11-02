@@ -763,13 +763,14 @@ function civTable() {
 // ---------------------------------------------------------------- over time
 
 // data/curves.json: every player-game's [resources, population, eco, army] every `step` seconds, in
-// PG's order. A player's line is the average over their games in view still going. Resources only ever
-// grow, so once one of those games has ended that line moves by the average change of the games still
-// going instead, and a game ending is not a drop.
+// PG's order. A player's line is the average over their games in view still going, except resources:
+// those only ever grow, so a game that has ended counts with its final total. That line never drops,
+// and at the end of the whole game it is the player's average total.
 const CURVE_METRICS = [["Resources collected", "res"], ["Population", "units"], ["Eco population", "units"], ["Military population", "units"]];
 const CURVE_PRESETS = [20, 30, 45, 60];
 const PIN_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"];
-const OT = { data: null, metric: 0, role: "all", from: 0, to: 60, max: 60, pinned: [], hover: null, hoverJ: null, geo: null, lines: [] };
+const OT = { data: null, metric: 0, role: "all", from: 0, to: 60, max: 60, last: 0, pinned: [], hover: null, hoverJ: null, geo: null, lines: [] };
+const curveEnd = () => Math.min(Math.round((OT.to * 60) / OT.data.step), OT.last);   // the window's last step with data
 
 const pinOf = (p) => OT.pinned.find((x) => x[0] === p);
 const pinColor = (p) => { const x = pinOf(p); return x ? (x[1] >= 0 ? PIN_COLORS[x[1]] : "var(--ink)") : null; };
@@ -853,8 +854,8 @@ function curveSection() {
     .then((r) => r.json())
     .then((d) => {
       OT.data = d;
-      const longest = Math.max(...d.series.filter(Boolean).map((s) => s[0].length - 1));
-      OT.max = Math.ceil((longest * d.step) / 60);
+      OT.last = Math.max(...d.series.filter(Boolean).map((s) => s[0].length - 1));
+      OT.max = Math.ceil((OT.last * d.step) / 60);
       OT.to = Math.min(60, OT.max);
       presets.innerHTML = CURVE_PRESETS.filter((m) => m < OT.max).map((m) => `<button type="button" data-m="${m}">0–${m}</button>`).join("")
         + `<button type="button" data-m="all">Whole game</button>`;
@@ -912,25 +913,18 @@ function curveUpdate() {
   const sel = cardCivs.curves, k = OT.metric, per = new Map();
   const add = (a, v) => {
     a.games++;
-    v.forEach((y, j) => {
+    for (let j = 0, len = k === 0 ? OT.last + 1 : v.length; j < len; j++) {
       a.n[j] = (a.n[j] || 0) + 1;
-      a.sum[j] = (a.sum[j] || 0) + y;
-      if (j) a.d[j] = (a.d[j] || 0) + y - v[j - 1];
-    });
+      a.sum[j] = (a.sum[j] || 0) + v[Math.min(j, v.length - 1)];
+    }
   };
   PG.forEach((x, i) => {
     const s = OT.data.series[i];
     if (!s || !roleOk(OT.role, x.role) || !civOk(sel, x.civ)) return;
-    if (!per.has(x.p)) per.set(x.p, { p: x.p, games: 0, sum: [], d: [], n: [] });
+    if (!per.has(x.p)) per.set(x.p, { p: x.p, games: 0, sum: [], n: [] });
     add(per.get(x.p), s[k]);
   });
-  const line = (a) => {
-    if (k !== 0) return a.sum.map((s, j) => s / a.n[j]);
-    const y = [a.sum[0] / a.n[0]];
-    for (let j = 1; j < a.n.length; j++) y.push(y[j - 1] + a.d[j] / a.n[j]);
-    return y;
-  };
-  OT.lines = [...per.values()].map((a) => ({ p: a.p, games: a.games, n: a.n, y: line(a) }));
+  OT.lines = [...per.values()].map((a) => ({ p: a.p, games: a.games, n: a.n, y: a.sum.map((s, j) => s / a.n[j]) }));
   curveDraw();
   curveList();
 }
@@ -949,7 +943,7 @@ function curveDraw() {
   if (!OT.data) return;
   const W = Math.max(280, wrap.clientWidth - 24), narrow = W < 560, H = narrow ? 300 : 420;
   const m = { l: 44, r: 12, t: 14, b: 34 }, iw = W - m.l - m.r, ih = H - m.t - m.b, step = OT.data.step;
-  const j0 = Math.round((OT.from * 60) / step), j1 = Math.round((OT.to * 60) / step);
+  const j0 = Math.round((OT.from * 60) / step), j1 = curveEnd();
   const x = (j) => m.l + ((j - j0) / (j1 - j0)) * iw;
   let ymax = 0;
   OT.lines.forEach((L) => { for (let j = j0; j <= Math.min(j1, L.y.length - 1); j++) if (L.y[j] > ymax) ymax = L.y[j]; });
@@ -961,7 +955,7 @@ function curveDraw() {
     h += `<text x="${m.l - 7}" y="${y(t) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${curveTick(t)}</text>`;
   });
   const span = OT.to - OT.from, mstep = [1, 2, 5, 10, 15, 20, 30].find((s) => span / s <= (narrow ? 5 : 9)) || 30;
-  for (let mm = Math.ceil(OT.from / mstep) * mstep; mm <= OT.to; mm += mstep) {
+  for (let mm = Math.ceil(OT.from / mstep) * mstep; (mm * 60) / step <= j1; mm += mstep) {
     const px = x((mm * 60) / step);
     h += `<line x1="${px}" x2="${px}" y1="${m.t + ih}" y2="${m.t + ih + 5}" stroke="var(--muted)" stroke-width="1"/>`;
     const anchor = px > m.l + iw - 24 ? "end" : px < m.l + 24 ? "start" : "middle";
@@ -1039,7 +1033,7 @@ function curveTip(hit) {
 function curveList() {
   const list = document.getElementById("curve-list"), head = document.getElementById("curve-side-head");
   if (!OT.data) return;
-  const j1 = Math.round((OT.to * 60) / OT.data.step), at = time(j1 * OT.data.step);
+  const j1 = curveEnd(), at = time(j1 * OT.data.step);
   const live = OT.lines.filter((L) => j1 < L.y.length).sort((a, b) => b.y[j1] - a.y[j1]);
   const over = OT.lines.filter((L) => j1 >= L.y.length).sort((a, b) => b.y.length - a.y.length);
   head.textContent = `${CURVE_METRICS[OT.metric][0]} at ${at}`;
