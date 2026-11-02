@@ -609,3 +609,73 @@ footer {
 .award figcaption { margin-top: .5rem; color: var(--muted); font-size: .84rem; }
 @media (max-width: 860px) { .award-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .award-gallery { grid-template-columns: 1fr; } }
+
+/* over time: one line per player, averaged over their games in view; the ranked list beside it */
+.curve-controls { margin-bottom: 1.2rem; }
+.curve-window { display: flex; flex-direction: column; gap: .35rem; }
+.curve-window .control-label { margin-bottom: 0; }
+.curve-window .seg { flex-wrap: wrap; font-size: .8rem; }
+.curve-window .seg button { padding: .25rem .5rem; }
+.curve-range { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .5rem; color: var(--muted); font-size: .8rem; }
+.curve-range input { width: 7.5rem; accent-color: var(--green); }
+.curve-range output { min-width: 5.5rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+.curve-board { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 1rem; align-items: start; }
+.curve-chart {
+  position: relative;
+  min-width: 0;
+  padding: .9rem 12px .5rem;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--paper);
+}
+.curve-chart svg { display: block; width: 100%; cursor: crosshair; }
+.curve-chart svg text { font-family: var(--sans); font-variant-numeric: tabular-nums; }
+.curve-tip {
+  position: absolute;
+  z-index: 5;
+  display: grid;
+  gap: .1rem;
+  min-width: 9rem;
+  padding: .5rem .65rem;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--white);
+  box-shadow: 0 6px 18px rgba(32, 37, 31, .12);
+  font-size: .8rem;
+  pointer-events: none;
+}
+.curve-tip[hidden] { display: none; }
+.curve-tip .tv { font: 700 1.15rem/1.2 var(--sans); font-variant-numeric: tabular-nums; }
+.curve-tip small { color: var(--muted); font-size: .74rem; font-weight: 400; }
+.curve-side { min-width: 0; border: 1px solid var(--line); border-radius: 5px; background: var(--white); }
+.curve-side-head { margin: 0; padding: .65rem .8rem; border-bottom: 1px solid var(--line); color: var(--muted); font-size: .76rem; }
+.curve-list { max-height: 440px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.curve-list button {
+  display: grid;
+  grid-template-columns: 1.6rem .8rem minmax(0, 1fr) auto;
+  gap: .45rem;
+  align-items: center;
+  width: 100%;
+  padding: .4rem .8rem;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  background: none;
+  font: inherit;
+  font-size: .84rem;
+  text-align: left;
+  cursor: pointer;
+}
+.curve-list button:hover, .curve-list button.hl { background: var(--green-soft); }
+.curve-list button[aria-pressed="true"] .nm { font-weight: 650; }
+.curve-list .rk { color: var(--muted); font-size: .76rem; text-align: right; font-variant-numeric: tabular-nums; }
+.curve-list .sw { width: .7rem; height: .7rem; border-radius: 50%; background: var(--c); }
+.curve-list .dash { width: .7rem; height: 2px; background: #bcc1b6; }
+.curve-list .nm { min-width: 0; overflow-wrap: anywhere; }
+.curve-list .nm small { display: block; color: var(--muted); font-size: .72rem; }
+.curve-list .val { font-variant-numeric: tabular-nums; }
+.curve-list .sub { padding: .6rem .8rem .3rem; color: var(--muted); font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; }
+@media (max-width: 900px) {
+  .curve-board { grid-template-columns: minmax(0, 1fr); }
+  .curve-list { max-height: 340px; }
+}

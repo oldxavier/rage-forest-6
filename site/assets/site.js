@@ -21,6 +21,7 @@ fetch("data/stats.json", { cache: "no-cache" })
     teamTable();
     playerTable();
     civTable();
+    curveSection();
   })
   .catch((e) => {
     document.querySelectorAll(".loading").forEach((el) => (el.textContent = "The data could not be loaded. Try reloading the page."));
@@ -324,6 +325,10 @@ function cardRows(b) {
   let rows = side.rows.agg
     ? playerTotals(side.rows, r, sel, side.asc ?? b.asc)
     : rowsOf(b, side.rows).filter((x) => b.scope === "match" || (roleOk(r, x.role) && civOk(sel, x.civ)));
+  if (b.one) {
+    const seen = new Set();
+    rows = rows.filter((x) => !seen.has(x.o) && seen.add(x.o));
+  }
   if (flip && !b.least) rows = rows.slice().reverse();
   if (b.cap) rows = rows.slice(0, b.cap);
   return { side, rows };
@@ -404,7 +409,7 @@ function boardCard(b) {
   views[b.id] = { b, rows, drawn: Math.min(rows.length, FIRST_DRAWN) };
   const note = side.note ?? b.note;
   return `<article class="board" id="board-${b.id}" data-id="${b.id}">
-    <div class="board-top"><span class="scope">${SCOPES[b.scope]}</span></div>
+    <div class="board-top"><span class="scope">${b.kind ? `One ${b.kind}, one game` : SCOPES[b.scope]}</span></div>
     <h3>${esc(side.title)}</h3>
     ${note ? `<p class="note">${esc(note)}</p>` : ""}
     ${controls(b, r)}
@@ -487,6 +492,7 @@ function closeCivs(refocus) {
   const id = civPop;
   civPop = null;
   if (id === "players") return playerCivs(refocus ? '[data-act="civs"]' : null);
+  if (id === "curves") return curveCivs(refocus ? '[data-act="civs"]' : null);
   if (document.getElementById(`board-${id}`)) redraw(id, refocus ? '[data-act="civs"]' : null);
 }
 
@@ -752,4 +758,306 @@ function civTable() {
     { key: "kills", label: "Kills", text: (r) => value(r.kills), sort: (r) => r.kills },
   ];
   sortable("civ-table", cols, D.civs, "picks");
+}
+
+// ---------------------------------------------------------------- over time
+
+// data/curves.json: every player-game's [resources, population, eco, army] every `step` seconds, in
+// PG's order. A player's line is the average over their games in view still going. Resources only ever
+// grow, so once one of those games has ended that line moves by the average change of the games still
+// going instead, and a game ending is not a drop.
+const CURVE_METRICS = [["Resources collected", "res"], ["Population", "units"], ["Eco population", "units"], ["Military population", "units"]];
+const CURVE_PRESETS = [20, 30, 45, 60];
+const PIN_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"];
+const OT = { data: null, metric: 0, role: "all", from: 0, to: 60, max: 60, pinned: [], hover: null, hoverJ: null, geo: null, lines: [] };
+
+const pinOf = (p) => OT.pinned.find((x) => x[0] === p);
+const pinColor = (p) => { const x = pinOf(p); return x ? (x[1] >= 0 ? PIN_COLORS[x[1]] : "var(--ink)") : null; };
+const curveValue = (v) => (v == null ? "–" : Math.round(v).toLocaleString("en-US"));
+const curveTick = (v) => (OT.metric === 0 && v >= 1000 ? `${v / 1000}k` : String(v));
+
+function pressed(el, key, val) {
+  el.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset[key] === String(val))));
+}
+
+function curveSection() {
+  const metricEl = document.getElementById("curve-metric");
+  metricEl.innerHTML = CURVE_METRICS.map(([l], i) => `<button type="button" data-i="${i}" aria-pressed="${i === OT.metric}">${l}</button>`).join("");
+  metricEl.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    OT.metric = +b.dataset.i;
+    pressed(metricEl, "i", OT.metric);
+    curveUpdate();
+  });
+  const roleEl = document.getElementById("curve-role");
+  roleEl.innerHTML = ROLES.map(([k, l]) => `<button type="button" data-role="${k}" aria-pressed="${k === OT.role}">${l}</button>`).join("");
+  roleEl.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    OT.role = b.dataset.role;
+    pressed(roleEl, "role", OT.role);
+    curveUpdate();
+  });
+
+  const box = document.getElementById("curve-civs");
+  box.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-act]");
+    if (!btn) return;
+    const act = btn.dataset.act;
+    if (act === "civs") civPop = civPop === "curves" ? null : "curves";
+    if (act === "civmode") (cardCivs.curves ||= { mode: "only", civs: new Set() }).mode = btn.dataset.mode;
+    if (act === "civclear") delete cardCivs.curves;
+    if (act === "civclose") civPop = null;
+    curveCivs(act === "civs" && civPop ? ".civ-pop input" : act === "civclose" ? '[data-act="civs"]' : `[data-act="${act}"]${btn.dataset.mode ? `[data-mode="${btn.dataset.mode}"]` : ""}`);
+  });
+  box.addEventListener("change", (e) => {
+    const civ = e.target.dataset.civ;
+    if (!civ) return;
+    const sel = (cardCivs.curves ||= { mode: "only", civs: new Set() });
+    e.target.checked ? sel.civs.add(civ) : sel.civs.delete(civ);
+    curveCivs(`input[data-civ="${CSS.escape(civ)}"]`);
+  });
+  curveCivs();
+
+  const presets = document.getElementById("curve-presets"), from = document.getElementById("curve-from"), to = document.getElementById("curve-to");
+  presets.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    OT.from = 0;
+    OT.to = b.dataset.m === "all" ? OT.max : Math.min(+b.dataset.m, OT.max);
+    curveWindow();
+  });
+  from.addEventListener("input", () => { OT.from = Math.min(+from.value, OT.max - 5); OT.to = Math.max(OT.to, OT.from + 5); curveWindow(); });
+  to.addEventListener("input", () => { OT.to = Math.max(+to.value, 5); OT.from = Math.min(OT.from, OT.to - 5); curveWindow(); });
+
+  const svg = document.getElementById("curve-svg");
+  svg.addEventListener("pointermove", (e) => {
+    const hit = curveHit(e);
+    const p = hit ? hit.p : null, j = hit ? hit.j : null;
+    if (p !== OT.hover || j !== OT.hoverJ) { OT.hover = p; OT.hoverJ = j; curveDraw(); curveMarkList(); }
+    curveTip(hit);
+  });
+  svg.addEventListener("pointerleave", () => { OT.hover = null; OT.hoverJ = null; curveTip(null); curveDraw(); curveMarkList(); });
+  svg.addEventListener("click", (e) => { const hit = curveHit(e); if (hit && hit.p) curvePin(hit.p); });
+
+  const list = document.getElementById("curve-list");
+  list.addEventListener("click", (e) => { const b = e.target.closest("button[data-p]"); if (b) curvePin(b.dataset.p); });
+  list.addEventListener("pointerover", (e) => {
+    const b = e.target.closest("button[data-p]"), p = b ? b.dataset.p : null;
+    if (p !== OT.hover) { OT.hover = p; OT.hoverJ = null; curveDraw(); curveMarkList(); }
+  });
+  list.addEventListener("pointerleave", () => { OT.hover = null; curveDraw(); curveMarkList(); });
+
+  const load = () => fetch("data/curves.json", { cache: "no-cache" })
+    .then((r) => r.json())
+    .then((d) => {
+      OT.data = d;
+      const longest = Math.max(...d.series.filter(Boolean).map((s) => s[0].length - 1));
+      OT.max = Math.ceil((longest * d.step) / 60);
+      OT.to = Math.min(60, OT.max);
+      presets.innerHTML = CURVE_PRESETS.filter((m) => m < OT.max).map((m) => `<button type="button" data-m="${m}">0–${m}</button>`).join("")
+        + `<button type="button" data-m="all">Whole game</button>`;
+      from.max = OT.max - 5;
+      to.max = OT.max;
+      document.getElementById("curve-loading").hidden = true;
+      new ResizeObserver(() => curveDraw()).observe(document.getElementById("curve-chart"));
+      curveUpdate();
+      curveWindow();
+    })
+    .catch((e) => { document.getElementById("curve-loading").textContent = "The chart data could not be loaded. Try reloading the page."; console.error(e); });
+  if ("IntersectionObserver" in window) {
+    const io = new IntersectionObserver((es) => { if (es.some((x) => x.isIntersecting)) { io.disconnect(); load(); } }, { rootMargin: "900px 0px" });
+    io.observe(document.getElementById("curves"));
+  } else load();
+}
+
+// the chart's civ button and list
+function curveCivs(focus) {
+  const box = document.getElementById("curve-civs");
+  const list = box.querySelector(".civ-list");
+  const scrolled = list ? list.scrollTop : 0;
+  const civs = [...new Set(PG.map((x) => x.civ))].sort((a, c) => a.localeCompare(c));
+  box.innerHTML = civButton("curves") + (civPop === "curves" ? civPopup("curves", civs) : "");
+  const newList = box.querySelector(".civ-list");
+  if (newList) newList.scrollTop = scrolled;
+  const target = focus && box.querySelector(focus);
+  if (target) target.focus({ preventScroll: true });
+  curveUpdate();
+}
+
+function curvePin(p) {
+  if (pinOf(p)) OT.pinned = OT.pinned.filter((x) => x[0] !== p);
+  else {
+    const used = new Set(OT.pinned.map((x) => x[1]));
+    OT.pinned.push([p, PIN_COLORS.findIndex((_, i) => !used.has(i))]);
+  }
+  curveDraw();
+  curveList();
+}
+
+function curveWindow() {
+  document.getElementById("curve-from").value = OT.from;
+  document.getElementById("curve-to").value = OT.to;
+  document.getElementById("curve-span").textContent = `${OT.from}–${OT.to} min`;
+  document.querySelectorAll("#curve-presets button").forEach((b) =>
+    b.setAttribute("aria-pressed", String(OT.from === 0 && (b.dataset.m === "all" ? OT.to === OT.max : +b.dataset.m === OT.to))));
+  curveDraw();
+  curveList();
+}
+
+// each player's line over their games in view (n: how many of them are still going)
+function curveUpdate() {
+  if (!OT.data) return;
+  const sel = cardCivs.curves, k = OT.metric, per = new Map();
+  const add = (a, v) => {
+    a.games++;
+    v.forEach((y, j) => {
+      a.n[j] = (a.n[j] || 0) + 1;
+      a.sum[j] = (a.sum[j] || 0) + y;
+      if (j) a.d[j] = (a.d[j] || 0) + y - v[j - 1];
+    });
+  };
+  PG.forEach((x, i) => {
+    const s = OT.data.series[i];
+    if (!s || !roleOk(OT.role, x.role) || !civOk(sel, x.civ)) return;
+    if (!per.has(x.p)) per.set(x.p, { p: x.p, games: 0, sum: [], d: [], n: [] });
+    add(per.get(x.p), s[k]);
+  });
+  const line = (a) => {
+    if (k !== 0) return a.sum.map((s, j) => s / a.n[j]);
+    const y = [a.sum[0] / a.n[0]];
+    for (let j = 1; j < a.n.length; j++) y.push(y[j - 1] + a.d[j] / a.n[j]);
+    return y;
+  };
+  OT.lines = [...per.values()].map((a) => ({ p: a.p, games: a.games, n: a.n, y: line(a) }));
+  curveDraw();
+  curveList();
+}
+
+function niceTicks(max, want) {
+  if (!(max > 0)) return { top: 1, ticks: [0, 1] };
+  const raw = max / want, pow = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((f) => f * pow).find((s) => s >= raw);
+  const top = Math.ceil(max / step - 1e-9) * step, ticks = [];
+  for (let v = 0; v <= top + step / 2; v += step) ticks.push(Math.round(v * 100) / 100);
+  return { top, ticks };
+}
+
+function curveDraw() {
+  const svg = document.getElementById("curve-svg"), wrap = document.getElementById("curve-chart");
+  if (!OT.data) return;
+  const W = Math.max(280, wrap.clientWidth - 24), narrow = W < 560, H = narrow ? 300 : 420;
+  const m = { l: 44, r: 12, t: 14, b: 34 }, iw = W - m.l - m.r, ih = H - m.t - m.b, step = OT.data.step;
+  const j0 = Math.round((OT.from * 60) / step), j1 = Math.round((OT.to * 60) / step);
+  const x = (j) => m.l + ((j - j0) / (j1 - j0)) * iw;
+  let ymax = 0;
+  OT.lines.forEach((L) => { for (let j = j0; j <= Math.min(j1, L.y.length - 1); j++) if (L.y[j] > ymax) ymax = L.y[j]; });
+  const { top, ticks } = niceTicks(ymax, narrow ? 4 : 5);
+  const y = (v) => m.t + ih - (v / top) * ih;
+  let h = "";
+  ticks.forEach((t) => {
+    h += `<line x1="${m.l}" x2="${m.l + iw}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)" stroke-width="1"/>`;
+    h += `<text x="${m.l - 7}" y="${y(t) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${curveTick(t)}</text>`;
+  });
+  const span = OT.to - OT.from, mstep = [1, 2, 5, 10, 15, 20, 30].find((s) => span / s <= (narrow ? 5 : 9)) || 30;
+  for (let mm = Math.ceil(OT.from / mstep) * mstep; mm <= OT.to; mm += mstep) {
+    const px = x((mm * 60) / step);
+    h += `<line x1="${px}" x2="${px}" y1="${m.t + ih}" y2="${m.t + ih + 5}" stroke="var(--muted)" stroke-width="1"/>`;
+    const anchor = px > m.l + iw - 24 ? "end" : px < m.l + 24 ? "start" : "middle";
+    h += `<text x="${px}" y="${m.t + ih + 19}" text-anchor="${anchor}" font-size="11" fill="var(--muted)">${time(mm * 60)}</text>`;
+  }
+  if (OT.hoverJ !== null) h += `<line x1="${x(OT.hoverJ)}" x2="${x(OT.hoverJ)}" y1="${m.t}" y2="${m.t + ih}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="2 3"/>`;
+  const path = (L) => {
+    let d = "";
+    for (let j = j0; j <= Math.min(j1, L.y.length - 1); j++) d += `${j === j0 ? "M" : "L"}${x(j).toFixed(1)},${y(L.y[j]).toFixed(1)}`;
+    return d;
+  };
+  const busy = OT.hover !== null || OT.pinned.length > 0;
+  OT.lines.forEach((L) => {
+    if (pinOf(L.p) || L.p === OT.hover) return;
+    const d = path(L);
+    if (d) h += `<path d="${d}" fill="none" stroke="#bcc1b6" stroke-width="1.25" stroke-linejoin="round" opacity="${busy ? 0.55 : 1}"/>`;
+  });
+  const labels = [];
+  const strong = (L, color, w) => {
+    const d = path(L);
+    if (!d) return;
+    h += `<path d="${d}" fill="none" stroke="${color}" stroke-width="${w}" stroke-linejoin="round" stroke-linecap="round"/>`;
+    const last = Math.min(j1, L.y.length - 1);
+    labels.push({ x: x(last), y: y(L.y[last]), text: player(L.p) });
+  };
+  OT.pinned.forEach(([p]) => { const L = OT.lines.find((x2) => x2.p === p); if (L && p !== OT.hover) strong(L, pinColor(p), 2.4); });
+  const hov = OT.hover && OT.lines.find((L) => L.p === OT.hover);
+  if (hov) strong(hov, pinColor(hov.p) || "var(--ink)", 2.8);
+  if (OT.hoverJ !== null && hov && OT.hoverJ < hov.y.length)
+    h += `<circle cx="${x(OT.hoverJ)}" cy="${y(hov.y[OT.hoverJ])}" r="4.5" fill="${pinColor(hov.p) || "var(--ink)"}" stroke="var(--white)" stroke-width="2"/>`;
+  labels.sort((a, b) => a.y - b.y);
+  for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 14) labels[i].y = labels[i - 1].y + 14;
+  labels.forEach((l) => {
+    h += `<text x="${l.x - 4}" y="${l.y - 7}" text-anchor="end" font-size="12" font-weight="650" fill="var(--ink)" stroke="var(--white)" stroke-width="4" paint-order="stroke" stroke-linejoin="round">${esc(l.text)}</text>`;
+  });
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("height", H);
+  svg.innerHTML = h;
+  OT.geo = { m, iw, ih, x, y, j0, j1, W, H };
+}
+
+function curveHit(e) {
+  const g = OT.geo, svg = document.getElementById("curve-svg");
+  if (!g) return null;
+  const box = svg.getBoundingClientRect();
+  const sx = ((e.clientX - box.left) * g.W) / box.width, sy = ((e.clientY - box.top) * g.H) / box.height;
+  if (sx < g.m.l - 4 || sx > g.m.l + g.iw + 4) return null;
+  const j = Math.max(g.j0, Math.min(g.j1, Math.round(g.j0 + ((sx - g.m.l) / g.iw) * (g.j1 - g.j0))));
+  let best = null, bd = 14;
+  OT.lines.forEach((L) => {
+    if (j >= L.y.length) return;
+    const d = Math.abs(g.y(L.y[j]) - sy);
+    if (d < bd) { bd = d; best = L; }
+  });
+  return { j, p: best ? best.p : null, L: best, box };
+}
+
+function curveTip(hit) {
+  const tip = document.getElementById("curve-tip");
+  if (!hit || !hit.L) { tip.hidden = true; return; }
+  const L = hit.L, j = hit.j, g = OT.geo;
+  const sub = `${esc(team(D.people[L.p].team))} · ${L.games} game${L.games === 1 ? "" : "s"}`;
+  tip.innerHTML = `<b>${esc(player(L.p))}</b><span class="tv">${curveValue(L.y[j])} <small>${CURVE_METRICS[OT.metric][1]} at ${time(j * OT.data.step)}</small></span><small>${sub}</small>`;
+  tip.hidden = false;
+  const wrap = document.getElementById("curve-chart").getBoundingClientRect(), b = hit.box;
+  const px = b.left - wrap.left + (g.x(j) * b.width) / g.W, py = b.top - wrap.top + (g.y(L.y[j]) * b.height) / g.H;
+  let left = px + 14, topPx = py - tip.offsetHeight - 10;
+  if (left + tip.offsetWidth > wrap.width - 6) left = px - tip.offsetWidth - 14;
+  if (topPx < 4) topPx = py + 14;
+  tip.style.left = `${Math.max(4, left)}px`;
+  tip.style.top = `${topPx}px`;
+}
+
+// players ranked by their value at the end of the window; players whose games had all ended by then follow
+function curveList() {
+  const list = document.getElementById("curve-list"), head = document.getElementById("curve-side-head");
+  if (!OT.data) return;
+  const j1 = Math.round((OT.to * 60) / OT.data.step), at = time(j1 * OT.data.step);
+  const live = OT.lines.filter((L) => j1 < L.y.length).sort((a, b) => b.y[j1] - a.y[j1]);
+  const over = OT.lines.filter((L) => j1 >= L.y.length).sort((a, b) => b.y.length - a.y.length);
+  head.textContent = `${CURVE_METRICS[OT.metric][0]} at ${at}`;
+  const row = (L, rank, val, note) => {
+    const c = pinColor(L.p);
+    return `<li><button type="button" data-p="${esc(L.p)}" aria-pressed="${!!c}" class="${L.p === OT.hover ? "hl" : ""}">
+      <span class="rk">${rank}</span>${c ? `<i class="sw" style="--c:${c}"></i>` : `<i class="dash"></i>`}
+      <span class="nm">${esc(player(L.p))}<small>${esc(team(D.people[L.p].team))} · ${note}</small></span>
+      <span class="val">${val}</span></button></li>`;
+  };
+  let html = live.map((L, i) => row(L, i + 1, curveValue(L.y[j1]), `${L.games} game${L.games === 1 ? "" : "s"}`)).join("");
+  if (over.length) {
+    html += `<li class="sub">Every game over before ${at}</li>`;
+    html += over.map((L) => row(L, "", "–", `ended by ${time((L.y.length - 1) * OT.data.step)}`)).join("");
+  }
+  list.innerHTML = html || `<li class="sub">No games for these filters.</li>`;
+}
+
+function curveMarkList() {
+  document.querySelectorAll("#curve-list button[data-p]").forEach((b) => b.classList.toggle("hl", b.dataset.p === OT.hover));
 }

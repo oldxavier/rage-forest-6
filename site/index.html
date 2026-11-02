@@ -9,9 +9,9 @@
   <meta property="og:description" content="Standings, records, awards and oddities from Rage Forest 6">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://oldxavier.github.io/rage-forest-6/">
-  <link rel="stylesheet" href="assets/site.css?v=2b9add454c">
-  <script src="assets/site.js?v=2b9add454c" defer></script>
-  <script src="assets/replay.js?v=2b9add454c" defer></script>
+  <link rel="stylesheet" href="assets/site.css?v=03f60151d1">
+  <script src="assets/site.js?v=03f60151d1" defer></script>
+  <script src="assets/replay.js?v=03f60151d1" defer></script>
   <script data-goatcounter="https://oldxavier.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
   <script>navigator.webdriver || fetch("https://oldxavier-sites.pages.dev/v?p=" + encodeURIComponent(location.pathname), {method: "POST", mode: "no-cors", keepalive: true}).catch(() => {});</script>
 </head>
@@ -25,6 +25,7 @@
         <a href="#records">Records</a>
         <a href="#players">Teams & players</a>
         <a href="#civs">Civs</a>
+        <a href="#curves">Over time</a>
         <a href="#replays">Replays</a>
         <a data-link="liquipedia" href="https://liquipedia.net/ageofempires/Rage_Forest/6">Liquipedia</a>
       </div>
@@ -110,6 +111,41 @@
         </div>
         <div class="table-shell civ-shell">
           <table class="civ-table" id="civ-table"><thead></thead><tbody></tbody></table>
+        </div>
+      </div>
+    </section>
+
+    <section class="section band" id="curves" aria-labelledby="curves-title">
+      <div class="section-heading">
+        <div>
+          <p class="section-label">Every player, minute by minute</p>
+          <h2 id="curves-title">Over time</h2>
+        </div>
+        <div class="heading-note"><p>Each line is one player, averaged over their games in view that are still going. Resources collected only ever grow, so when one of a player's games ends, that line carries on with the average change of the games left instead of dropping. Late in the clock a line rests on fewer games. Hover a line for its numbers; select a player to keep their line in colour.</p></div>
+      </div>
+      <div class="leader-controls curve-controls">
+        <div><span class="control-label">Show</span><div class="scope-switch" id="curve-metric" role="group" aria-label="Measure"></div></div>
+        <div><span class="control-label">Games played as</span><div class="scope-switch role-switch" id="curve-role" role="group" aria-label="Player role"></div></div>
+        <div><span class="control-label">Civs</span><div class="civ-filter" id="curve-civs"></div></div>
+        <div class="curve-window">
+          <span class="control-label">Minutes</span>
+          <div class="seg" id="curve-presets" role="group" aria-label="Time window"></div>
+          <div class="curve-range">
+            <label for="curve-from">From</label><input type="range" id="curve-from" min="0" step="1" value="0">
+            <label for="curve-to">to</label><input type="range" id="curve-to" min="1" step="1" value="60">
+            <output id="curve-span">0:00–60:00</output>
+          </div>
+        </div>
+      </div>
+      <div class="curve-board">
+        <div class="curve-chart" id="curve-chart">
+          <svg id="curve-svg" role="img" aria-labelledby="curves-title"></svg>
+          <p class="loading" id="curve-loading">Loading…</p>
+          <div class="curve-tip" id="curve-tip" hidden></div>
+        </div>
+        <div class="curve-side">
+          <p class="curve-side-head" id="curve-side-head"></p>
+          <ol class="curve-list" id="curve-list"></ol>
         </div>
       </div>
     </section>
