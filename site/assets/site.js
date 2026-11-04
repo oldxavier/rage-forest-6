@@ -11,6 +11,8 @@ fetch("data/stats.json", { cache: "no-cache" })
     D = data;
     gamesById = Object.fromEntries(D.games.map((g) => [g.tag, g]));
     PG = D.pg.map(([p, g, civ, role, w]) => ({ p, g, civ, role, w: !!w }));
+    D.boards.list.forEach((b) => { if (b.civs) cardCivs[b.id] = { mode: b.civs.mode, civs: new Set(b.civs.civs) }; });
+    soloCopy();
     links();
     summary();
     groups();
@@ -22,6 +24,8 @@ fetch("data/stats.json", { cache: "no-cache" })
     playerTable();
     civTable();
     curveSection();
+    headToHead();
+    stripes();
   })
   .catch((e) => {
     document.querySelectorAll(".loading").forEach((el) => (el.textContent = "The data could not be loaded. Try reloading the page."));
@@ -32,6 +36,7 @@ fetch("data/stats.json", { cache: "no-cache" })
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const team = (k) => (D.teams[k] ? D.teams[k].name : k);
+const teamOf = (p) => (D.meta.solo ? "" : `${esc(team(D.people[p].team))} · `);   // "<team> · ", nothing in a 1v1
 const player = (id) => (D.people[id] ? D.people[id].name : id);
 // the in-game name, where it differs from the Liquipedia name shown
 const alias = (id) => (D.people[id] && D.people[id].ingame !== D.people[id].name ? D.people[id].ingame : "");
@@ -53,6 +58,7 @@ function time(s) {
 function value(v, fmt) {
   if (v == null) return "–";
   if (fmt === "time") return time(v);
+  if (fmt === "pct") return `${v.toLocaleString("en-US", { maximumFractionDigits: 1 })}%`;
   if (fmt === "dec1") return v.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   if (fmt === "dec2") return v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   if (fmt === "kres") {
@@ -65,6 +71,24 @@ function value(v, fmt) {
 
 const signed = (n) => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : "0");
 
+// a 1v1's two players with their civs
+function sidesHtml(tag) {
+  const g = gamesById[tag];
+  return [g.a, g.b].map((s) => `${esc(player(g.teams[s][0].p))} ${civTag(g.teams[s][0].civ)}`).join(" v ");
+}
+
+// alternate sections on white, from the first one shown (the groups, or the records where there are none)
+function stripes() {
+  document.querySelectorAll("main > .section:not([hidden]):not(.replays):not(.about)").forEach((s, i) => s.classList.toggle("band", i % 2 === 0));
+}
+
+// a 1v1 collection's own wording, where the page's is about teams: [data-solo] holds the 1v1 text
+function soloCopy() {
+  if (!D.meta.solo) return;
+  document.querySelectorAll("[data-solo]").forEach((el) => (el.textContent = el.dataset.solo));
+  document.querySelectorAll("[data-solo-placeholder]").forEach((el) => (el.placeholder = el.dataset.soloPlaceholder));
+}
+
 function gameLabel(tag) {
   const g = gamesById[tag];
   return g ? `${team(g.a)} v ${team(g.b)} G${g.n}` : tag;
@@ -74,6 +98,7 @@ function links() {
   document.querySelectorAll("[data-link]").forEach((a) => {
     const href = D.meta[a.dataset.link];
     if (href) a.href = href;
+    else (a.closest("[data-link-wrap]") || a).hidden = true;     // a collection with no Liquipedia or Discord
   });
 }
 
@@ -96,6 +121,11 @@ function summary() {
 // ---------------------------------------------------------------- groups and results
 
 function groups() {
+  if (!Object.keys(D.groups).length) {          // not a tournament: no standings
+    document.getElementById("groups").hidden = true;
+    document.querySelectorAll('a[href="#groups"]').forEach((a) => (a.hidden = true));
+    return;
+  }
   const swiss = D.meta.format === "swiss";       // a Swiss stage: Median-Buchholz, and no team-by-team grid
   document.getElementById("group-tables").innerHTML = Object.entries(D.groups)
     .map(([g, { table, grid }]) => {
@@ -223,6 +253,10 @@ function seriesRow(s) {
 // ---------------------------------------------------------------- role filter (players table)
 
 function roleSwitches() {
+  if (D.meta.solo) {                            // 1v1: no flanks or pockets, and every player is a team
+    document.querySelectorAll(".role-switch").forEach((el) => (el.parentElement.hidden = true));
+    document.querySelectorAll("[data-teams]").forEach((el) => (el.hidden = true));
+  }
   const el = document.querySelector("#players .role-switch");
   el.innerHTML = ROLES.map(([k, l]) => `<button type="button" data-role="${k}" aria-pressed="${k === role}">${l}</button>`).join("");
   el.addEventListener("click", (e) => {
@@ -316,7 +350,8 @@ function totalsDetail(kind, parts) {
     const items = [...count].filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
     return items.length ? items.map(([k, n]) => `${n}× ${k}`).join(", ") : null;
   }
-  return kind.map((label, j) => `${Math.round(parts.reduce((s, p) => s + p[j], 0))} ${label}`).join(", ");
+  const named = kind.map((label, j) => [Math.round(parts.reduce((s, p) => s + p[j], 0)), label]).filter(([n]) => n);
+  return named.length ? named.map(([n, label]) => `${n} ${label}`).join(", ") : null;
 }
 
 function cardRows(b) {
@@ -342,7 +377,7 @@ function civsOf(b) {
     if (rows.agg) rows.vals.forEach(([i]) => civs.add(PG[i].civ));
     else rowsOf(b, rows).forEach((x) => civs.add(x.civ));
   };
-  if (b.scope === "war") D.war.forEach((x) => civs.add(x.civ));
+  if (b.scope === "war") D.war.forEach((x) => civs.add(x.a.civ).add(x.b.civ));
   else add(b.rows), b.least && add(b.least.rows);
   return [...civs].sort((a, c) => a.localeCompare(c));
 }
@@ -351,11 +386,11 @@ function civsOf(b) {
 
 // a row: the name (with the civ beside it), then one short line each for the game and any detail
 function who(b, r) {
-  if (b.scope === "match") return { main: gameLabel(r.g), lines: [esc(`Round ${gamesById[r.g].round} · Group ${gamesById[r.g].group}`)] };
+  if (b.scope === "match") return { main: gameLabel(r.g), lines: [D.meta.solo ? sidesHtml(r.g) : esc(`Round ${gamesById[r.g].round} · Group ${gamesById[r.g].group}`)] };
   if (b.scope === "object")
     return { main: r.o, lines: [`${esc(player(r.p))} ${civTag(r.civ)}`, esc(gameLabel(r.g))] };
   if (b.scope === "player")
-    return { main: player(r.p), lines: [`${esc(team(D.people[r.p].team))} · ${r.n} game${r.n === 1 ? "" : "s"}`, r.d ? esc(r.d) : ""] };
+    return { main: player(r.p), lines: [`${teamOf(r.p)}${r.n} game${r.n === 1 ? "" : "s"}`, r.d ? esc(r.d) : ""] };
   return { main: player(r.p), civ: r.civ, lines: [esc(gameLabel(r.g)), r.d ? esc(r.d) : ""] };
 }
 
@@ -363,7 +398,7 @@ const SCOPES = { game: "One game", player: "All games", object: "One unit or bui
 const CIV_SCOPES = new Set(["game", "player", "object", "war"]);
 
 function controls(b, r) {
-  const roles = b.scope === "match" ? "" : `<span class="seg" role="group" aria-label="Player role">${ROLES.map(
+  const roles = b.scope === "match" || b.scope === "war" || D.meta.solo ? "" : `<span class="seg" role="group" aria-label="Player role">${ROLES.map(
     ([k, l]) => `<button type="button" data-act="role" data-role="${k}" aria-pressed="${k === r}">${l}</button>`
   ).join("")}</span>`;
   const flip = cardFlip.has(b.id);
@@ -557,27 +592,33 @@ function showAwards() {
 
 function warCard(b, r) {
   return `<article class="board war" id="board-${b.id}" data-id="${b.id}">
-    <div class="board-top"><span class="scope">One game · per player</span></div>
+    <div class="board-top"><span class="scope">One game · flank against the flank facing them</span></div>
     <h3>${esc(b.title)}</h3>
     ${controls(b, r)}
     <div class="table-shell war-shell"><table class="war-table" id="war-table"><thead></thead><tbody></tbody></table></div>
   </article>`;
 }
 
+// one row per war, the winner first; each side's figures are for the fight window
 function warTable() {
-  const r = cardRole.dark_age_war || "all";
-  const rows = D.war.filter((x) => roleOk(r, x.role) && civOk(cardCivs.dark_age_war, x.civ));
+  const sel = cardCivs.villager_wars;
+  const rows = D.war.filter((x) => civOk(sel, x.a.civ) || civOk(sel, x.b.civ));
+  const who = (s) => `<span title="${esc(player(s.p))}${aliasNote(s.p)}">${esc(player(s.p))}</span><small>${civTag(s.civ)}</small><small>Feudal click ${time(s.click)}</small>`;
+  const pair = (x, y, f) => `${f(x)} <span class="vs-sep">/</span> ${f(y)}`;
+  const part = (v) => (v > 0 ? `+${v.toFixed(1)}` : v < 0 ? `−${(-v).toFixed(1)}` : "0");
   const cols = [
-    { key: "name", label: "Player", cls: "name", html: (r) => `<span title="${esc(player(r.p))}${aliasNote(r.p)}">${esc(player(r.p))}</span><small>${civTag(r.civ)} · ${esc(gameLabel(r.g))}</small>`, sort: (r) => player(r.p).toLowerCase(), asc: true },
-    { key: "vs", label: "Against", cls: "team", html: (r) => r.vs.map((p) => esc(player(p))).join(", "), sort: (r) => player(r.vs[0]).toLowerCase(), asc: true },
-    { key: "killed", label: "Killed", text: (r) => r.killed, sort: (r) => r.killed },
-    { key: "lost", label: "Lost", text: (r) => r.lost, sort: (r) => r.lost },
-    { key: "net", label: "Net", text: (r) => signed(r.net), sort: (r) => r.net * 1000 + r.killed + r.lost, tone: (r) => r.net },
-    { key: "idle", label: "Idle TC", text: (r) => time(r.idle), sort: (r) => r.idle, asc: true },
-    { key: "opp", label: "Their idle TC", text: (r) => time(r.opp_idle), sort: (r) => r.opp_idle },
-    { key: "econ", label: "Balance", text: (r) => signed(r.econ), sort: (r) => r.econ, tone: (r) => r.econ, title: D.meta.balance_note },
+    { key: "game", label: "Game", cls: "name wrap", html: (r) => esc(gameLabel(r.g)), sort: (r) => r.g, asc: true },
+    { key: "won", label: "Won by", cls: "name", html: (r) => who(r.a), sort: (r) => player(r.a.p).toLowerCase(), asc: true },
+    { key: "lost", label: "Against", cls: "name", html: (r) => who(r.b), sort: (r) => player(r.b.p).toLowerCase(), asc: true },
+    { key: "margin", label: "Result", html: (r) => `<b>${r.margin.toFixed(1)}</b> villagers<small>kills ${part(r.parts.kills)} · scouts ${part(r.parts.scouts)}</small><small>made ${part(r.parts.made)} · off work ${part(r.parts.off)}</small>`,
+      sort: (r) => r.margin, title: "The result in villagers, and where it came from" },
+    { key: "vills", label: "Villagers", text: (r) => `${r.vk}–${r.vl}`, sort: (r) => r.vk - r.vl, title: "Villagers each side killed of the other during the fight, winner first" },
+    { key: "scouts", label: "Scouts", text: (r) => `${r.sk}–${r.sl}`, sort: (r) => r.sk - r.sl, title: "Scouts each side killed of the other in the Dark Age, winner first" },
+    { key: "idle", label: "Idle TC", html: (r) => pair(r.a, r.b, (s) => time(s.idle)), sort: (r) => r.b.idle - r.a.idle, title: "Town Center idle time from the start of the game to the end of the fight, winner / the other" },
+    { key: "off", label: "Off work, min", html: (r) => pair(r.a, r.b, (s) => Math.round(s.off)), sort: (r) => r.b.off - r.a.off,
+      title: "Villager-minutes spent idle, walking or fighting instead of gathering during the fight, winner / the other" },
   ];
-  sortable("war-table", cols, rows, "econ");
+  sortable("war-table", cols, rows, "margin");
 }
 
 // ---------------------------------------------------------------- units made
@@ -670,6 +711,13 @@ function playerTable() {
     { key: "res", label: "Res / game", text: (r) => value(r.res), sort: (r) => r.res },
     { key: "walls", label: "Walls / game", text: (r) => value(r.walls), sort: (r) => r.walls },
   ];
+  if (D.meta.solo) {          // 1v1: no teams or roles, and how much of the workforce stood still
+    cols.splice(0, cols.length, ...cols.filter((c) => c.key !== "team" && c.key !== "role"));
+    cols.splice(cols.findIndex((c) => c.key === "res"), 0,
+      { key: "housed", label: "Housed / game", text: (r) => time(r.housed), sort: (r) => r.housed, asc: true },
+      { key: "idle_share", label: "Villager time idle", text: (r) => value(r.idle_share, "pct"), sort: (r) => r.idle_share, asc: true },
+      { key: "gather_rate", label: "Res / villager-min", text: (r) => value(r.gather_rate, "dec1"), sort: (r) => r.gather_rate });
+  }
   const update = sortable("player-table", cols, playerRows(), "kills", "player-search");
   refresh.push(() => update(playerRows()));
   const box = document.getElementById("players-civs");
@@ -715,6 +763,7 @@ function playerRows() {
   });
   return [...games].map(([p, idx]) => {
     const avg = (c) => {
+      if (!col[c]) return null;
       const v = idx.map((i) => col[c][i]).filter((x) => x != null);
       return v.length ? Math.round((v.reduce((a, b) => a + b, 0) / v.length) * 10) / 10 : null;
     };
@@ -726,15 +775,17 @@ function playerRows() {
       kills, deaths, kd: Math.round((kills / Math.max(deaths, 1)) * 100) / 100,
       eapm: avg("total_real_eapgm"), feudal: avg("feudal"), castle: avg("castle"), imperial: avg("imperial"),
       idle_feudal: avg("idle_feudal"), idle_castle: avg("idle_castle"), res: avg("total_collected_res"), walls: avg("walls"),
+      housed: avg("housed"), idle_share: avg("idle_share"), gather_rate: avg("gather_rate"),
     };
   });
 }
 
 function teamTable() {
+  if (D.meta.solo) return;                      // 1v1: every player is a team, and the table is hidden
   const per = (k) => ({ text: (r) => value(r[k]), sort: (r) => r[k] });
   const cols = [
     { key: "team", label: "Team", cls: "name", text: (r) => team(r.team), sort: (r) => team(r.team).toLowerCase(), asc: true },
-    { key: "group", label: "Group", cls: "team", text: (r) => D.teams[r.team].group, sort: (r) => D.teams[r.team].group, asc: true },
+    { key: "group", label: "Group", cls: "team", text: (r) => (D.teams[r.team] || {}).group || "–", sort: (r) => (D.teams[r.team] || {}).group || "", asc: true },
     { key: "games", label: "Games", text: (r) => r.games, sort: (r) => r.games },
     { key: "wins", label: "Won", text: (r) => r.wins, sort: (r) => r.wins },
     { key: "unit_kills", label: "Kills", ...per("unit_kills") },
@@ -763,10 +814,24 @@ function civTable() {
 // ---------------------------------------------------------------- over time
 
 // data/curves.json: every player-game's [resources, population, eco, army] every `step` seconds, in
-// PG's order. A player's line is the average over their games in view still going, except resources:
-// those only ever grow, so a game that has ended counts with its final total. That line never drops,
-// and at the end of the whole game it is the player's average total.
-const CURVE_METRICS = [["Resources collected", "res"], ["Population", "units"], ["Eco population", "units"], ["Military population", "units"]];
+// PG's order, and in a 1v1 collection also [idle TC, housed, eAPM over the last minute, resources
+// banked]. A player's line is the average over their games in view still going, except for what only
+// ever grows (resources, idle TC, time housed): a game that has ended counts with its final total, so
+// the line never drops, and at the end of the whole game it is the player's average total.
+const CURVE_METRICS = [
+  { label: "Resources collected", unit: "res", grows: true },
+  { label: "Population", unit: "units" },
+  { label: "Eco population", unit: "units" },
+  { label: "Military population", unit: "units" },
+];
+const SOLO_METRICS = [
+  { label: "Idle TC", unit: "idle", grows: true, fmt: "time", low: true },     // low: the list ranks the least first
+  { label: "Housed", unit: "housed", grows: true, fmt: "time", low: true },
+  { label: "eAPM", unit: "eAPM over the minute before" },
+  { label: "Unspent", unit: "res banked", low: true },
+];
+let curvesLoad = null;
+const curves = () => (curvesLoad ||= fetch("data/curves.json", { cache: "no-cache" }).then((r) => r.json()));
 const CURVE_PRESETS = [20, 30, 45, 60];
 const PIN_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"];
 const OT = { data: null, metric: 0, role: "all", from: 0, to: 60, max: 60, last: 0, pinned: [], hover: null, hoverJ: null, geo: null, lines: [] };
@@ -774,16 +839,17 @@ const curveEnd = () => Math.min(Math.round((OT.to * 60) / OT.data.step), OT.last
 
 const pinOf = (p) => OT.pinned.find((x) => x[0] === p);
 const pinColor = (p) => { const x = pinOf(p); return x ? (x[1] >= 0 ? PIN_COLORS[x[1]] : "var(--ink)") : null; };
-const curveValue = (v) => (v == null ? "–" : Math.round(v).toLocaleString("en-US"));
-const curveTick = (v) => (OT.metric === 0 && v >= 1000 ? `${v / 1000}k` : String(v));
+const curveValue = (v, k = OT.metric) => (v == null ? "–" : CURVE_METRICS[k].fmt === "time" ? time(v) : Math.round(v).toLocaleString("en-US"));
+const curveTick = (v, k = OT.metric) => (CURVE_METRICS[k].fmt === "time" ? time(v) : v >= 1000 ? `${v / 1000}k` : String(v));
 
 function pressed(el, key, val) {
   el.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset[key] === String(val))));
 }
 
 function curveSection() {
+  if (D.meta.solo) CURVE_METRICS.push(...SOLO_METRICS);
   const metricEl = document.getElementById("curve-metric");
-  metricEl.innerHTML = CURVE_METRICS.map(([l], i) => `<button type="button" data-i="${i}" aria-pressed="${i === OT.metric}">${l}</button>`).join("");
+  metricEl.innerHTML = CURVE_METRICS.map(({ label: l }, i) => `<button type="button" data-i="${i}" aria-pressed="${i === OT.metric}">${l}</button>`).join("");
   metricEl.addEventListener("click", (e) => {
     const b = e.target.closest("button");
     if (!b) return;
@@ -850,8 +916,7 @@ function curveSection() {
   });
   list.addEventListener("pointerleave", () => { OT.hover = null; curveDraw(); curveMarkList(); });
 
-  const load = () => fetch("data/curves.json", { cache: "no-cache" })
-    .then((r) => r.json())
+  const load = () => curves()
     .then((d) => {
       OT.data = d;
       OT.last = Math.max(...d.series.filter(Boolean).map((s) => s[0].length - 1));
@@ -913,7 +978,7 @@ function curveUpdate() {
   const sel = cardCivs.curves, k = OT.metric, per = new Map();
   const add = (a, v) => {
     a.games++;
-    for (let j = 0, len = k === 0 ? OT.last + 1 : v.length; j < len; j++) {
+    for (let j = 0, len = CURVE_METRICS[k].grows ? OT.last + 1 : v.length; j < len; j++) {
       a.n[j] = (a.n[j] || 0) + 1;
       a.sum[j] = (a.sum[j] || 0) + v[Math.min(j, v.length - 1)];
     }
@@ -929,10 +994,12 @@ function curveUpdate() {
   curveList();
 }
 
-function niceTicks(max, want) {
-  if (!(max > 0)) return { top: 1, ticks: [0, 1] };
+// round steps up to `max`: in seconds (15 s, 30 s, a minute...) when the values are times
+function niceTicks(max, want, secs) {
+  if (!(max > 0)) return { top: secs ? 60 : 1, ticks: secs ? [0, 60] : [0, 1] };
   const raw = max / want, pow = 10 ** Math.floor(Math.log10(raw));
-  const step = [1, 2, 2.5, 5, 10].map((f) => f * pow).find((s) => s >= raw);
+  const step = secs ? [5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600].find((s) => s >= raw) || 3600
+    : [1, 2, 2.5, 5, 10].map((f) => f * pow).find((s) => s >= raw);
   const top = Math.ceil(max / step - 1e-9) * step, ticks = [];
   for (let v = 0; v <= top + step / 2; v += step) ticks.push(Math.round(v * 100) / 100);
   return { top, ticks };
@@ -947,7 +1014,7 @@ function curveDraw() {
   const x = (j) => m.l + ((j - j0) / (j1 - j0)) * iw;
   let ymax = 0;
   OT.lines.forEach((L) => { for (let j = j0; j <= Math.min(j1, L.y.length - 1); j++) if (L.y[j] > ymax) ymax = L.y[j]; });
-  const { top, ticks } = niceTicks(ymax, narrow ? 4 : 5);
+  const { top, ticks } = niceTicks(ymax, narrow ? 4 : 5, CURVE_METRICS[OT.metric].fmt === "time");
   const y = (v) => m.t + ih - (v / top) * ih;
   let h = "";
   ticks.forEach((t) => {
@@ -1017,8 +1084,8 @@ function curveTip(hit) {
   const tip = document.getElementById("curve-tip");
   if (!hit || !hit.L) { tip.hidden = true; return; }
   const L = hit.L, j = hit.j, g = OT.geo;
-  const sub = `${esc(team(D.people[L.p].team))} · ${L.games} game${L.games === 1 ? "" : "s"}`;
-  tip.innerHTML = `<b>${esc(player(L.p))}</b><span class="tv">${curveValue(L.y[j])} <small>${CURVE_METRICS[OT.metric][1]} at ${time(j * OT.data.step)}</small></span><small>${sub}</small>`;
+  const sub = `${teamOf(L.p)}${L.games} game${L.games === 1 ? "" : "s"}`;
+  tip.innerHTML = `<b>${esc(player(L.p))}</b><span class="tv">${curveValue(L.y[j])} <small>${CURVE_METRICS[OT.metric].unit} at ${time(j * OT.data.step)}</small></span><small>${sub}</small>`;
   tip.hidden = false;
   const wrap = document.getElementById("curve-chart").getBoundingClientRect(), b = hit.box;
   const px = b.left - wrap.left + (g.x(j) * b.width) / g.W, py = b.top - wrap.top + (g.y(L.y[j]) * b.height) / g.H;
@@ -1034,14 +1101,15 @@ function curveList() {
   const list = document.getElementById("curve-list"), head = document.getElementById("curve-side-head");
   if (!OT.data) return;
   const j1 = curveEnd(), at = time(j1 * OT.data.step);
-  const live = OT.lines.filter((L) => j1 < L.y.length).sort((a, b) => b.y[j1] - a.y[j1]);
+  const dir = CURVE_METRICS[OT.metric].low ? -1 : 1;
+  const live = OT.lines.filter((L) => j1 < L.y.length).sort((a, b) => dir * (b.y[j1] - a.y[j1]));
   const over = OT.lines.filter((L) => j1 >= L.y.length).sort((a, b) => b.y.length - a.y.length);
-  head.textContent = `${CURVE_METRICS[OT.metric][0]} at ${at}`;
+  head.textContent = `${CURVE_METRICS[OT.metric].label} at ${at}`;
   const row = (L, rank, val, note) => {
     const c = pinColor(L.p);
     return `<li><button type="button" data-p="${esc(L.p)}" aria-pressed="${!!c}" class="${L.p === OT.hover ? "hl" : ""}">
       <span class="rk">${rank}</span>${c ? `<i class="sw" style="--c:${c}"></i>` : `<i class="dash"></i>`}
-      <span class="nm">${esc(player(L.p))}<small>${esc(team(D.people[L.p].team))} · ${note}</small></span>
+      <span class="nm">${esc(player(L.p))}<small>${teamOf(L.p)}${note}</small></span>
       <span class="val">${val}</span></button></li>`;
   };
   let html = live.map((L, i) => row(L, i + 1, curveValue(L.y[j1]), `${L.games} game${L.games === 1 ? "" : "s"}`)).join("");
@@ -1054,4 +1122,164 @@ function curveList() {
 
 function curveMarkList() {
   document.querySelectorAll("#curve-list button[data-p]").forEach((b) => b.classList.toggle("hl", b.dataset.p === OT.hover));
+}
+
+// ---------------------------------------------------------------- head to head (1v1 collections)
+
+// one game's two players side by side. A row marks the better of the two where better is plain:
+// earlier (1 = more is better, -1 = less is better); eAPM, the market and walls are told, not judged
+const H2H_ROWS = [
+  ["Ages", [["feudal", "Feudal Age", "time", -1], ["castle", "Castle Age", "time", -1], ["imperial", "Imperial Age", "time", -1],
+    ["idle_feudal", "Idle TC to Feudal", "time", -1], ["idle_castle", "Idle TC to Castle", "time", -1], ["housed", "Housed", "time", -1]]],
+  ["Economy techs", [["loom", "Loom", "time", -1], ["dba", "Double-Bit Axe", "time", -1], ["wheelbarrow", "Wheelbarrow", "time", -1],
+    ["horse_collar", "Horse Collar", "time", -1], ["gold_mining", "Gold Mining", "time", -1], ["bow_saw", "Bow Saw", "time", -1],
+    ["hand_cart", "Hand Cart", "time", -1]]],
+  ["Military techs", [["fletching", "Fletching", "time", -1], ["bloodlines", "Bloodlines", "time", -1], ["ballistics", "Ballistics", "time", -1]]],
+  ["Economy", [["vills10", "Villagers at 10:00", null, 1], ["vills15", "Villagers at 15:00", null, 1], ["vills20", "Villagers at 20:00", null, 1],
+    ["res10", "Gathered by 10:00", null, 1], ["res20", "Gathered by 20:00", null, 1], ["total_collected_res", "Gathered in all", null, 1],
+    ["gather_rate", "Res per villager-minute, to 20:00", "dec1", 1], ["idle_share", "Villager time idle", "pct", -1],
+    ["float_avg", "Unspent on average, from 5:00", null, -1]]],
+  ["Speed", [["total_real_eapgm", "eAPM", "dec1", 0], ["eapm_dark", "eAPM in the Dark Age", "dec1", 0], ["eapm_feudal", "eAPM in Feudal", "dec1", 0],
+    ["eapm_castle", "eAPM in Castle and after", "dec1", 0], ["eapm_peak5", "eAPM, busiest five minutes", "dec1", 0]]],
+  ["Fighting", [["unit_kills", "Units killed", null, 1], ["unit_deaths", "Units lost", null, -1], ["kd", "K/D", "dec2", 1],
+    ["eco_kills", "Villagers killed", null, 1], ["first_vill_kill", "First villager killed", "time", -1]]],
+  ["Market and map", [["market_clicks", "Market clicks", null, 0], ["market_net", "Gold from the market", "signed", 0],
+    ["explored10", "Map seen by 10:00", "pct", 1], ["walls", "Wall pieces", null, 0]]],
+];
+const COUNTS = new Set(["unit_kills", "unit_deaths", "eco_kills", "market_clicks", "market_net", "walls"]);   // none means 0
+// curves.json's series charted per game: [index, title]
+const H2H_CHARTS = [[0, "Resources collected"], [2, "Eco population"], [3, "Military population"], [4, "Idle TC"], [6, "eAPM"], [7, "Unspent"]];
+const H2H_COLORS = ["#2a78d6", "#eb6834"];
+const H2H_PRESETS = [10, 20, 30];
+const H2H = { tag: null, j: null, curves: null, to: null };     // to: the charts' last minute, null for the whole game
+
+function headToHead() {
+  if (!D.meta.solo) return;
+  document.getElementById("h2h").hidden = false;
+  document.querySelector('nav a[href="#h2h"]').hidden = false;
+  const sel = document.getElementById("h2h-game");
+  const order = [...D.games].sort((a, b) => a.n - b.n);
+  sel.innerHTML = order.map((g) => `<option value="${esc(g.tag)}">${esc(gameLabel(g.tag))}</option>`).join("");
+  H2H.tag = order[0].tag;
+  sel.addEventListener("change", () => { H2H.tag = sel.value; H2H.j = null; h2hDraw(); });
+  document.getElementById("h2h-window").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    H2H.to = b.dataset.m === "all" ? null : +b.dataset.m;
+    H2H.j = null;
+    h2hWindow();
+  });
+  document.getElementById("h2h-replay").addEventListener("click", () => {
+    const rs = document.getElementById("game-select");
+    if (!rs) return;
+    rs.value = H2H.tag;
+    rs.dispatchEvent(new Event("change"));
+  });
+  const charts = document.getElementById("h2h-charts");
+  charts.innerHTML = H2H_CHARTS.map(([k, t]) => `<figure class="h2h-chart" data-k="${k}"><figcaption><span class="t">${t}</span><span class="v"></span></figcaption><svg role="img" aria-label="${t}, both players"></svg></figure>`).join("");
+  charts.addEventListener("pointermove", (e) => {
+    const svg = e.target.closest("svg"), g = svg && svg.__geo;
+    if (!g) return;
+    const box = svg.getBoundingClientRect(), sx = ((e.clientX - box.left) * g.W) / box.width;
+    const j = Math.max(0, Math.min(g.n - 1, Math.round(((sx - g.l) / g.iw) * (g.n - 1))));
+    if (j !== H2H.j) { H2H.j = j; h2hCharts(); }
+  });
+  charts.addEventListener("pointerleave", () => { H2H.j = null; h2hCharts(); });
+  new ResizeObserver(() => h2hCharts()).observe(charts);
+  h2hDraw();
+  const load = () => curves().then((d) => { H2H.curves = d; h2hCharts(); })
+    .catch((e) => { charts.insertAdjacentHTML("beforebegin", `<p class="loading">The chart data could not be loaded. Try reloading the page.</p>`); console.error(e); });
+  if ("IntersectionObserver" in window) {
+    const io = new IntersectionObserver((es) => { if (es.some((x) => x.isIntersecting)) { io.disconnect(); load(); } }, { rootMargin: "900px 0px" });
+    io.observe(charts);
+  } else load();
+}
+
+// the picked game's two players: [{p, civ, w, i (their index in PG)}], side a first
+function h2hSides() {
+  const g = gamesById[H2H.tag];
+  return [g.a, g.b].map((s) => {
+    const { p, civ } = g.teams[s][0];
+    const i = PG.findIndex((x) => x.g === g.tag && x.p === p);
+    return { p, civ, w: g.winner === s, i };
+  });
+}
+
+function h2hDraw() {
+  const g = gamesById[H2H.tag], sides = h2hSides(), col = D.pg_stats;
+  document.getElementById("h2h-game").value = H2H.tag;
+  document.getElementById("h2h-replay").hidden = !D.meta.replays.includes(H2H.tag) || !document.getElementById("game-select");
+  document.getElementById("h2h-head").innerHTML = sides.map((s, n) => `<div class="h2h-side ${n ? "b" : "a"}">
+      <i class="sw" style="--c:${H2H_COLORS[n]}"></i>
+      <div><b>${esc(player(s.p))}</b>${civTag(s.civ)}</div>
+      <span class="pill ${s.w ? "won" : "lost"}">${s.w ? "Won" : "Lost"}</span></div>`).join(`<div class="h2h-mid">G${g.n}<small>${time(g.length)}</small></div>`);
+  const val = (key, i) => {
+    if (key === "kd") return (col.unit_kills[i] || 0) / Math.max(col.unit_deaths[i] || 0, 1);
+    const v = col[key] ? col[key][i] : null;
+    return v == null && COUNTS.has(key) ? 0 : v;
+  };
+  const show = (v, fmt) => (fmt === "signed" ? (v == null ? "–" : signed(Math.round(v)).replace(/\d+/, (d) => (+d).toLocaleString("en-US"))) : value(v, fmt));
+  let h = "";
+  H2H_ROWS.forEach(([group, rows]) => {
+    const body = rows.map(([key, label, fmt, dir]) => {
+      const [a, b] = sides.map((s) => val(key, s.i));
+      if (a == null && b == null) return "";
+      const r = (v) => (v == null ? v : Math.round(v * (fmt === "dec2" ? 100 : fmt === "dec1" || fmt === "pct" ? 10 : 1)));   // as shown
+      const better = dir && a != null && b != null && r(a) !== r(b) ? ((a - b) * dir > 0 ? 0 : 1) : null;
+      const cell = (v, n) => `<td class="${n ? "b" : "a"}${better === n ? " best" : ""}" style="--c:${H2H_COLORS[n]}">${show(v, fmt)}</td>`;
+      return `<tr>${cell(a, 0)}<th scope="row">${label}</th>${cell(b, 1)}</tr>`;
+    }).join("");
+    if (body) h += `<tbody><tr class="grp"><th colspan="3" scope="colgroup">${group}</th></tr>${body}</tbody>`;
+  });
+  document.getElementById("h2h-table").innerHTML =
+    `<thead><tr>${sides.map((s, n) => `<th scope="col" class="${n ? "b" : "a"}">${esc(player(s.p))}</th>`).join('<th scope="col"><span class="sr">Measure</span></th>')}</tr></thead>${h}`;
+  h2hWindow();
+}
+
+// the charts' minute presets: those shorter than the game, and the whole game
+function h2hWindow() {
+  const mins = gamesById[H2H.tag].length / 60, shown = H2H_PRESETS.filter((m) => m < mins);
+  if (!shown.includes(H2H.to)) H2H.to = null;
+  const el = document.getElementById("h2h-window");
+  el.innerHTML = shown.map((m) => `<button type="button" data-m="${m}" aria-pressed="${H2H.to === m}">0–${m}</button>`).join("")
+    + `<button type="button" data-m="all" aria-pressed="${H2H.to === null}">Whole game</button>`;
+  h2hCharts();
+}
+
+// the small charts: both players' lines over the game, one shared time under the pointer
+function h2hCharts() {
+  const d = H2H.curves;
+  if (!d || !H2H.tag) return;
+  const sides = h2hSides(), series = sides.map((s) => d.series[s.i]);
+  const end = H2H.to === null ? Infinity : Math.round((H2H.to * 60) / d.step) + 1;      // steps shown
+  document.querySelectorAll("#h2h-charts .h2h-chart").forEach((fig) => {
+    const k = +fig.dataset.k, svg = fig.querySelector("svg"), lines = series.map((s) => (s ? s[k].slice(0, end) : []));
+    const n = Math.max(...lines.map((v) => v.length)), secs = k === 4 || k === 5;
+    const W = Math.max(240, svg.clientWidth || fig.clientWidth - 28), H = 150, l = 40, r = 10, t = 8, b = 22, iw = W - l - r, ih = H - t - b;
+    const ymax = Math.max(0, ...lines.flat());
+    const { top, ticks } = niceTicks(ymax, 3, secs);
+    const x = (j) => l + (j / Math.max(n - 1, 1)) * iw, y = (v) => t + ih - (v / top) * ih;
+    const fmt = (v) => (v == null ? "–" : secs ? time(v) : Math.round(v).toLocaleString("en-US"));
+    let h = ticks.map((v) => `<line x1="${l}" x2="${l + iw}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/>`
+      + `<text x="${l - 6}" y="${y(v) + 4}" text-anchor="end" font-size="10.5" fill="var(--muted)">${secs ? time(v) : v >= 1000 ? `${v / 1000}k` : v}</text>`).join("");
+    const mins = (n - 1) * d.step / 60, mstep = [2, 5, 10, 15, 20, 30].find((s) => mins / s <= (W < 400 ? 3 : 5)) || 30;
+    for (let mm = 0; mm * 60 <= (n - 1) * d.step; mm += mstep) {
+      const px = x((mm * 60) / d.step);
+      h += `<text x="${px}" y="${H - 6}" text-anchor="${mm === 0 ? "start" : px > W - 30 ? "end" : "middle"}" font-size="10.5" fill="var(--muted)">${mm}:00</text>`;
+    }
+    const j = H2H.j;
+    if (j !== null) h += `<line x1="${x(j)}" x2="${x(j)}" y1="${t}" y2="${t + ih}" stroke="var(--muted)" stroke-dasharray="2 3"/>`;
+    lines.forEach((v, s) => {
+      if (!v.length) return;
+      h += `<path d="${v.map((yv, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(yv).toFixed(1)}`).join("")}" fill="none" stroke="${H2H_COLORS[s]}" stroke-width="2" stroke-linejoin="round"/>`;
+      if (j !== null && j < v.length) h += `<circle cx="${x(j)}" cy="${y(v[j])}" r="3.5" fill="${H2H_COLORS[s]}" stroke="var(--white)" stroke-width="1.5"/>`;
+    });
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.setAttribute("height", H);
+    svg.innerHTML = h;
+    svg.__geo = { W, l, iw, n };
+    fig.querySelector(".v").innerHTML = lines.map((v, s) =>
+      `<span><i class="sw" style="--c:${H2H_COLORS[s]}"></i>${fmt(v[j === null ? v.length - 1 : Math.min(j, v.length - 1)])}</span>`).join("")
+      + `<small>${j === null ? (H2H.to === null ? "at the end" : `at ${time((n - 1) * d.step)}`) : `at ${time(j * d.step)}`}</small>`;
+  });
 }
