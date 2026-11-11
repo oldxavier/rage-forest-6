@@ -22,7 +22,7 @@ fetch("data/stats.json", { cache: "no-cache" })
     categories();
     teamTable();
     playerTable();
-    civTable();
+    civPlot();
     curveSection();
     headToHead();
     stripes();
@@ -275,6 +275,13 @@ function roleSwitches() {
 const cardRole = {};
 const cardCivs = {};               // card id -> {mode: "only" | "except", civs: Set}
 const cardFlip = new Set();        // cards showing the other end of their list
+const cardView = {};               // card id -> "alt" where a card with two views shows its other one
+
+// the card as it shows now: its other view (one game against all games, or total against per game)
+// laid over it when chosen; the other view brings its own order buttons, or none
+function viewOf(b) {
+  return b.alt && cardView[b.id] === "alt" ? { ...b, label: undefined, least: undefined, ...b.alt } : b;
+}
 let civPop = null;                 // the card (or "players") whose civ list is open
 const views = {};                  // card id -> the rows it shows now, and how many are drawn
 const FIRST_DRAWN = 40, MORE_DRAWN = 80;
@@ -296,6 +303,7 @@ function categories() {
     category = btn.dataset.cat;
     civPop = null;
     showCategory();
+    toTabTop();
   });
   const boards = document.getElementById("boards");
   boards.addEventListener("click", cardClick);
@@ -305,6 +313,14 @@ function categories() {
   document.addEventListener("keydown", (e) => e.key === "Escape" && civPop && closeCivs(true));
   category = cats[0].id;
   showCategory();
+}
+
+// A tab opens at its top: from far down a long tab, a short one would otherwise leave the page
+// showing whatever comes after it. Only when scrolled past the tab's start, under the sticky tab bar.
+function toTabTop() {
+  const bar = document.querySelector(".category-bar"), start = document.getElementById("category-blurb");
+  const y = start.getBoundingClientRect().top + window.scrollY - bar.offsetHeight;
+  if (window.scrollY > y) window.scrollTo({ top: y, behavior: "auto" });
 }
 
 // ---- which rows a card shows
@@ -326,7 +342,12 @@ function playerTotals(spec, r, sel, asc) {
   const acc = new Map();
   for (const [i, v, parts] of spec.vals) {
     if (!inView(PG[i])) continue;
-    const a = acc.get(PG[i].p) || { sum: 0, n: 0, parts: [] };
+    const a = acc.get(PG[i].p) || { sum: 0, n: 0, parts: [], never: 0 };
+    if (v === null) {               // a game it never happened in: not in the average, but said on the row
+      a.never += 1;
+      acc.set(PG[i].p, a);
+      continue;
+    }
     a.sum += v;
     a.n += 1;
     if (parts !== undefined) a.parts.push(parts);
@@ -335,8 +356,19 @@ function playerTotals(spec, r, sel, asc) {
   const out = [];
   for (const [p, a] of acc) {
     const n = spec.agg.avg ? a.n : played.get(p);
-    if (n < spec.agg.min) continue;
-    out.push({ p, n, v: Math.round(((spec.agg.avg ? a.sum / a.n : a.sum) * 100)) / 100, d: totalsDetail(spec.agg.detail, a.parts) });
+    if (!a.n || n < spec.agg.min) continue;
+    if (spec.agg.ratio !== undefined) {
+      // the totals' ratio (all kills over all deaths), not the average of each game's; none lost is ∞,
+      // ranked above every finite ratio by a value no real one reaches
+      const top = a.parts.reduce((s, x) => s + x[0], 0), bottom = a.parts.reduce((s, x) => s + x[1], 0);
+      if (top < spec.agg.ratio) continue;
+      out.push({ p, n, v: bottom ? Math.round((top / bottom) * 100) / 100 : 1e6 + top, txt: bottom ? null : "∞",
+                 d: `${Math.round(top)} kills, ${Math.round(bottom)} deaths` });
+      continue;
+    }
+    const never = a.never ? `never in ${a.never} game${a.never === 1 ? "" : "s"}` : null;
+    out.push({ p, n, v: Math.round(((spec.agg.avg ? a.sum / a.n : a.sum) * 100)) / 100,
+               d: [totalsDetail(spec.agg.detail, a.parts), never].filter(Boolean).join(" · ") || null });
   }
   return out.sort((x, y) => (asc ? x.v - y.v : y.v - x.v));
 }
@@ -398,6 +430,12 @@ const SCOPES = { game: "One game", player: "All games", object: "One unit or bui
 const CIV_SCOPES = new Set(["game", "player", "object", "war"]);
 
 function controls(b, r) {
+  const shown = cardView[b.id] || "main";
+  const scopes = b.switch
+    ? `<span class="seg" role="group" aria-label="Games">${b.switch
+        .map(([k, l]) => `<button type="button" data-act="view" data-view="${k}" aria-pressed="${shown === k}">${esc(l)}</button>`)
+        .join("")}</span>`
+    : "";
   const roles = b.scope === "match" || b.scope === "war" || D.meta.solo ? "" : `<span class="seg" role="group" aria-label="Player role">${ROLES.map(
     ([k, l]) => `<button type="button" data-act="role" data-role="${k}" aria-pressed="${k === r}">${l}</button>`
   ).join("")}</span>`;
@@ -410,7 +448,7 @@ function controls(b, r) {
       ? ""
       : `<button type="button" class="flip" data-act="flip" aria-pressed="${flip}" title="Turn the list round">Reverse</button>`;
   const civs = CIV_SCOPES.has(b.scope) ? civButton(b.id) + (civPop === b.id ? civPopup(b.id, civsOf(b)) : "") : "";
-  return roles || order || civs ? `<div class="card-controls">${roles}${order}${civs}</div>` : "";
+  return scopes || roles || order || civs ? `<div class="card-controls">${scopes}${roles}${order}${civs}</div>` : "";
 }
 
 function civButton(id) {
@@ -436,17 +474,20 @@ function civPopup(id, civs) {
   </div>`;
 }
 
-function boardCard(b) {
+function boardCard(card) {
+  const b = viewOf(card);           // one game or all games, whichever the card shows now
   const r = cardRole[b.id] || "all";
   if (b.scope === "war") return warCard(b, r);
   if (b.scope === "units") return unitsCard(b, r);
   const { side, rows } = cardRows(b);
   views[b.id] = { b, rows, drawn: Math.min(rows.length, FIRST_DRAWN) };
+  // No subtitle: the note is the title's tooltip, so switching views never moves the card around.
+  // The scope line stays only where it says more than the switch or the title would.
   const note = side.note ?? b.note;
+  const scope = b.kind ? `One ${b.kind}, one game` : b.scope === "match" ? SCOPES.match : "";
   return `<article class="board" id="board-${b.id}" data-id="${b.id}">
-    <div class="board-top"><span class="scope">${b.kind ? `One ${b.kind}, one game` : SCOPES[b.scope]}</span></div>
-    <h3>${esc(side.title)}</h3>
-    ${note ? `<p class="note">${esc(note)}</p>` : ""}
+    ${scope ? `<div class="board-top"><span class="scope">${scope}</span></div>` : ""}
+    <h3${note ? ` title="${esc(note)}"` : ""}>${esc(side.title)}</h3>
     ${controls(b, r)}
     ${rows.length ? `<ol class="board-list" data-id="${b.id}">${rowsHtml(b, rows, 0, views[b.id].drawn)}</ol>` : `<p class="empty">${emptyText(b, r)}</p>`}
   </article>`;
@@ -498,6 +539,7 @@ function cardClick(e) {
   if (!card) return;
   const id = card.dataset.id, act = btn.dataset.act;
   if (act === "role") cardRole[id] = btn.dataset.role;
+  if (act === "view") (cardView[id] = btn.dataset.view), cardFlip.delete(id);     // each view opens on its best
   if (act === "side") btn.dataset.side === "least" ? cardFlip.add(id) : cardFlip.delete(id);
   if (act === "flip") cardFlip.has(id) ? cardFlip.delete(id) : cardFlip.add(id);
   if (act === "civs") civPop = civPop === id ? null : id;
@@ -506,7 +548,7 @@ function cardClick(e) {
   if (act === "civclose") civPop = null;
   const focus = act === "civs" && civPop === id ? ".civ-pop input"
     : act === "civclose" ? '[data-act="civs"]'
-    : `[data-act="${act}"]${btn.dataset.role ? `[data-role="${btn.dataset.role}"]` : ""}${btn.dataset.side ? `[data-side="${btn.dataset.side}"]` : ""}${btn.dataset.mode ? `[data-mode="${btn.dataset.mode}"]` : ""}`;
+    : `[data-act="${act}"]${btn.dataset.role ? `[data-role="${btn.dataset.role}"]` : ""}${btn.dataset.view ? `[data-view="${btn.dataset.view}"]` : ""}${btn.dataset.side ? `[data-side="${btn.dataset.side}"]` : ""}${btn.dataset.mode ? `[data-mode="${btn.dataset.mode}"]` : ""}`;
   redraw(id, focus);
 }
 
@@ -603,7 +645,7 @@ function warCard(b, r) {
 function warTable() {
   const sel = cardCivs.villager_wars;
   const rows = D.war.filter((x) => civOk(sel, x.a.civ) || civOk(sel, x.b.civ));
-  const who = (s) => `<span title="${esc(player(s.p))}${aliasNote(s.p)}">${esc(player(s.p))}</span><small>${civTag(s.civ)}</small><small>Feudal click ${time(s.click)}</small>`;
+  const who = (s) => `<span title="${esc(player(s.p))}${aliasNote(s.p)}">${esc(player(s.p))}</span>${D.meta.solo ? "" : `<small>${esc(team(s.team))}</small>`}<small>${civTag(s.civ)}</small><small>Feudal click ${time(s.click)}</small>`;
   const pair = (x, y, f) => `${f(x)} <span class="vs-sep">/</span> ${f(y)}`;
   const part = (v) => (v > 0 ? `+${v.toFixed(1)}` : v < 0 ? `−${(-v).toFixed(1)}` : "0");
   const cols = [
@@ -614,7 +656,7 @@ function warTable() {
       sort: (r) => r.margin, title: "The result in villagers, and where it came from" },
     { key: "vills", label: "Villagers", text: (r) => `${r.vk}–${r.vl}`, sort: (r) => r.vk - r.vl, title: "Villagers each side killed of the other during the fight, winner first" },
     { key: "scouts", label: "Scouts", text: (r) => `${r.sk}–${r.sl}`, sort: (r) => r.sk - r.sl, title: "Scouts each side killed of the other in the Dark Age, winner first" },
-    { key: "idle", label: "Idle TC", html: (r) => pair(r.a, r.b, (s) => time(s.idle)), sort: (r) => r.b.idle - r.a.idle, title: "Town Center idle time from the start of the game to the end of the fight, winner / the other" },
+    { key: "idle", label: "Idle TC", html: (r) => pair(r.a, r.b, (s) => time(s.idle)), sort: (r) => r.b.idle - r.a.idle, title: "Town Center idle time during the fight, winner / the other" },
     { key: "off", label: "Off work, min", html: (r) => pair(r.a, r.b, (s) => Math.round(s.off)), sort: (r) => r.b.off - r.a.off,
       title: "Villager-minutes spent idle, walking or fighting instead of gathering during the fight, winner / the other" },
   ];
@@ -699,8 +741,9 @@ function playerTable() {
     { key: "role", label: "Role", cls: "team", text: roleText, sort: (r) => r.flank - r.pocket, search: true },
     { key: "games", label: "Games", text: (r) => r.games, sort: (r) => r.games },
     { key: "wins", label: "Won", text: (r) => r.wins, sort: (r) => r.wins },
-    { key: "kills", label: "Kills", text: (r) => value(r.kills), sort: (r) => r.kills },
-    { key: "deaths", label: "Deaths", text: (r) => value(r.deaths), sort: (r) => r.deaths },
+    { key: "length", label: "Avg game", text: (r) => time(r.length), sort: (r) => r.length, title: "Average length of the player's games" },
+    { key: "kills", label: "Kills", text: (r) => value(r.kills), sort: (r) => r.kills, title: "Units killed per game" },
+    { key: "deaths", label: "Deaths", text: (r) => value(r.deaths), sort: (r) => r.deaths, title: "Units lost per game" },
     { key: "kd", label: "K/D", text: (r) => value(r.kd, "dec2"), sort: (r) => r.kd },
     { key: "eapm", label: "eAPM", text: (r) => value(r.eapm, "dec1"), sort: (r) => r.eapm },
     { key: "feudal", label: "Feudal", text: (r) => time(r.feudal), sort: (r) => r.feudal, asc: true },
@@ -771,8 +814,11 @@ function playerRows() {
     const kills = tot("unit_kills"), deaths = tot("unit_deaths");
     return {
       p, team: D.people[p].team, games: idx.length, wins: idx.filter((i) => PG[i].w).length,
+      length: idx.reduce((s, i) => s + gamesById[PG[i].g].length, 0) / idx.length,
       flank: idx.filter((i) => PG[i].role === "flank").length, pocket: idx.filter((i) => PG[i].role === "pocket").length,
-      kills, deaths, kd: Math.round((kills / Math.max(deaths, 1)) * 100) / 100,
+      // per game, like the other columns; K/D is the totals' ratio, which per-game averages give too
+      kills: kills / idx.length, deaths: deaths / idx.length,
+      kd: deaths ? Math.round((kills / deaths) * 100) / 100 : kills ? Infinity : null,      // none lost: ∞
       eapm: avg("total_real_eapgm"), feudal: avg("feudal"), castle: avg("castle"), imperial: avg("imperial"),
       idle_feudal: avg("idle_feudal"), idle_castle: avg("idle_castle"), res: avg("total_collected_res"), walls: avg("walls"),
       housed: avg("housed"), idle_share: avg("idle_share"), gather_rate: avg("gather_rate"),
@@ -788,27 +834,89 @@ function teamTable() {
     { key: "group", label: "Group", cls: "team", text: (r) => (D.teams[r.team] || {}).group || "–", sort: (r) => (D.teams[r.team] || {}).group || "", asc: true },
     { key: "games", label: "Games", text: (r) => r.games, sort: (r) => r.games },
     { key: "wins", label: "Won", text: (r) => r.wins, sort: (r) => r.wins },
+    { key: "length", label: "Avg game", text: (r) => time(r.length), sort: (r) => r.length, title: "Average length of the team's games" },
     { key: "unit_kills", label: "Kills", ...per("unit_kills") },
     { key: "eco_kills", label: "Eco kills", ...per("eco_kills") },
     { key: "building_razes", label: "Razed", ...per("building_razes") },
     { key: "total_collected_res", label: "Resources", ...per("total_collected_res") },
-    { key: "trade_profit", label: "Trade profit", ...per("trade_profit") },
-    { key: "walls", label: "Wall pieces", ...per("walls") },
+    { key: "trade_profit", label: "Trade", ...per("trade_profit"), title: "Trade profit per game" },
+    { key: "walls", label: "Walls", ...per("walls"), title: "Wall pieces per game" },
     { key: "towers", label: "Towers", ...per("towers") },
     { key: "castles", label: "Castles", ...per("castles") },
   ];
-  sortable("team-table", cols, D.team_rows, "wins");
+  const lengths = (t) => D.games.filter((g) => g.a === t || g.b === t).map((g) => g.length);
+  const rows = D.team_rows.map((r) => {
+    const l = lengths(r.team);
+    return { ...r, length: l.length ? l.reduce((a, b) => a + b, 0) / l.length : null };
+  });
+  sortable("team-table", cols, rows, "wins");
 }
 
-function civTable() {
-  const cols = [
-    { key: "civ", label: "Civ", cls: "name", html: (r) => civTag(r.civ), sort: (r) => r.civ, asc: true },
-    { key: "picks", label: "Picks", text: (r) => r.picks, sort: (r) => r.picks },
-    { key: "wins", label: "Won", text: (r) => r.wins, sort: (r) => r.wins },
-    { key: "rate", label: "Win %", text: (r) => (r.picks >= 3 ? Math.round((100 * r.wins) / r.picks) + "%" : "–"), sort: (r) => (r.picks >= 3 ? r.wins / r.picks : null) },
-    { key: "kills", label: "Kills", text: (r) => value(r.kills), sort: (r) => r.kills },
-  ];
-  sortable("civ-table", cols, D.civs, "picks");
+// Every civ by picks (across) and win rate (up), drawn with its emblem. Civs with the same picks AND
+// wins sit on the same spot, so they are drawn as one group there -- nudging them apart would invent a
+// difference -- and the line under the plot names everyone on the spot hovered, focused or tapped.
+function civPlot() {
+  const fig = document.getElementById("civ-plot");
+  const spots = new Map();
+  for (const c of D.civs) {
+    const k = `${c.picks}/${c.wins}`;
+    if (!spots.has(k)) spots.set(k, { picks: c.picks, wins: c.wins, civs: [] });
+    spots.get(k).civs.push(c.civ);
+  }
+  const pts = [...spots.values()];
+  pts.forEach((s) => s.civs.sort((a, b) => a.localeCompare(b)));
+  const W = 760, H = 440, L = 54, R = 24, T = 26, B = 56, pw = W - L - R, ph = H - T - B;
+  const xMax = Math.max(...pts.map((s) => s.picks)) + 1;
+  const x = (p) => L + (p / xMax) * pw;
+  const y = (rate) => T + (1 - (rate + 0.08) / 1.16) * ph;        // a little room above 100% and below 0%
+  const step = xMax <= 15 ? 1 : xMax <= 30 ? 2 : 5;
+  const E = 20, GAP = 2;                                         // emblem size and the space between, in a group
+  const pct = (s) => Math.round((100 * s.wins) / s.picks);
+  const says = (s) => `${s.civs.join(", ")}: ${s.picks} pick${s.picks === 1 ? "" : "s"}, ${s.wins} won (${pct(s)}%)`;
+
+  let svg = `<svg class="civ-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Civilizations by picks and win rate">
+    <defs><clipPath id="civ-round" clipPathUnits="objectBoundingBox"><circle cx=".5" cy=".5" r=".5"/></clipPath></defs>`;
+  for (const v of [0, 0.25, 0.5, 0.75, 1])
+    svg += `<line class="${v === 0.5 ? "civ-half" : "civ-grid"}" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/>
+      <text class="civ-tick" x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${v * 100}%</text>`;
+  for (let p = 0; p <= xMax; p += step)
+    svg += `<line class="civ-grid" x1="${x(p)}" x2="${x(p)}" y1="${T}" y2="${H - B}"/>
+      <text class="civ-tick" x="${x(p)}" y="${H - B + 18}" text-anchor="middle">${p}</text>`;
+  svg += `<text class="civ-axis" x="${L + pw / 2}" y="${H - 12}" text-anchor="middle">Times picked</text>
+    <text class="civ-axis" transform="translate(14 ${T + ph / 2}) rotate(-90)" text-anchor="middle">Win rate</text>`;
+  // the busiest spots last, so a small group is never hidden under a big one
+  const order = pts.map((s, i) => i).sort((a, b) => pts[a].civs.length - pts[b].civs.length);
+  for (const i of order) {
+    const s = pts[i], n = s.civs.length;
+    const cols = Math.ceil(Math.sqrt(n)), rows = Math.ceil(n / cols);
+    const gw = cols * E + (cols - 1) * GAP, gh = rows * E + (rows - 1) * GAP;
+    const cx = x(s.picks), cy = y(s.wins / s.picks), x0 = cx - gw / 2, y0 = cy - gh / 2;
+    let g = `<g class="civ-pt" tabindex="0" role="button" data-i="${i}" aria-label="${esc(says(s))}"><title>${esc(says(s))}</title>`;
+    if (n > 1) g += `<rect class="civ-pt-bg" x="${x0 - 3}" y="${y0 - 3}" width="${gw + 6}" height="${gh + 6}" rx="${E / 2 + 3}"/>`;
+    s.civs.forEach((civ, j) => {
+      const ex = x0 + (j % cols) * (E + GAP), ey = y0 + Math.floor(j / cols) * (E + GAP);
+      const src = D.emblems[civ];
+      g += src
+        ? `<image href="${esc(src)}" x="${ex}" y="${ey}" width="${E}" height="${E}" clip-path="url(#civ-round)" preserveAspectRatio="xMidYMid slice"/>`
+        : `<circle class="civ-noemblem" cx="${ex + E / 2}" cy="${ey + E / 2}" r="${E / 2}"/><text class="civ-initials" x="${ex + E / 2}" y="${ey + E / 2 + 3.5}" text-anchor="middle">${esc(civ.slice(0, 2))}</text>`;
+    });
+    svg += g + "</g>";
+  }
+  svg += "</svg>";
+  const hint = "Hover or tap a civ to see who is on that spot.";
+  fig.innerHTML = `${svg}<figcaption class="civ-caption" id="civ-caption">${hint}</figcaption>`;
+  const cap = document.getElementById("civ-caption");
+  const show = (e) => {
+    const g = e.target.closest && e.target.closest(".civ-pt");
+    if (!g) return;
+    fig.querySelectorAll(".civ-pt.on").forEach((x) => x.classList.remove("on"));
+    g.classList.add("on");
+    const s = pts[+g.dataset.i];
+    cap.innerHTML = `<span class="civ-caption-civs">${s.civs.map(civTag).join(" ")}</span> <span>${s.picks} pick${s.picks === 1 ? "" : "s"}, ${s.wins} won · <b>${pct(s)}%</b></span>`;
+  };
+  fig.addEventListener("pointerover", show);
+  fig.addEventListener("focusin", show);
+  fig.addEventListener("click", show);
 }
 
 // ---------------------------------------------------------------- over time

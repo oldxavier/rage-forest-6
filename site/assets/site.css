@@ -494,6 +494,22 @@ td.name { font-weight: 650; }
 td.team { color: var(--muted); }
 td.hot { color: var(--gold); }
 .civ-shell { max-height: 560px; }
+/* civs: picks against win rate */
+.civ-plot { margin: 0; }
+.civ-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.civ-grid { stroke: #ebeae4; stroke-width: 1; }
+.civ-half { stroke: #c3c2b7; stroke-width: 1.5; }
+.civ-tick { fill: var(--muted); font: 12px var(--sans); }
+.civ-axis { fill: var(--muted); font: 13px var(--sans); }
+.civ-pt { cursor: pointer; outline: none; }
+.civ-pt-bg { fill: var(--white); stroke: var(--line); stroke-width: 1; }
+.civ-pt:hover .civ-pt-bg, .civ-pt:focus-visible .civ-pt-bg, .civ-pt.on .civ-pt-bg { stroke: var(--green); stroke-width: 2; }
+.civ-pt.on image, .civ-pt:focus-visible image { filter: drop-shadow(0 0 1.5px var(--green)); }
+.civ-noemblem { fill: var(--green-soft); stroke: var(--line); }
+.civ-initials { fill: var(--ink); font: 9px var(--sans); }
+.civ-caption { min-height: 2.6rem; margin-top: .6rem; color: var(--muted); font-size: .9rem; line-height: 1.6; }
+.civ-caption .civ { margin-right: .5rem; color: var(--ink); }
+.civ-caption b { color: var(--ink); }
 
 /* about */
 .about-copy { max-width: 680px; margin: 0; color: var(--muted); font-size: 1.05rem; }

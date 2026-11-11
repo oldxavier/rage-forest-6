@@ -9,9 +9,9 @@
   <meta property="og:description" content="Standings, records, awards and oddities from Rage Forest 6">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://oldxavier.github.io/rage-forest-6/">
-  <link rel="stylesheet" href="assets/site.css?v=4b8aeda249">
-  <script src="assets/site.js?v=4b8aeda249" defer></script>
-  <script src="assets/replay.js?v=4b8aeda249" defer></script>
+  <link rel="stylesheet" href="assets/site.css?v=9b6cb01ee5">
+  <script src="assets/site.js?v=9b6cb01ee5" defer></script>
+  <script src="assets/replay.js?v=9b6cb01ee5" defer></script>
   <script data-goatcounter="https://oldxavier.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
   <script>navigator.webdriver || fetch("https://oldxavier-sites.pages.dev/v?p=" + encodeURIComponent(location.pathname), {method: "POST", mode: "no-cors", keepalive: true}).catch(() => {});</script>
 </head>
@@ -104,7 +104,6 @@
           <p class="section-label" data-solo="Every player">Every team and player</p>
           <h2 id="players-title" data-solo="Players">Teams &amp; players</h2>
         </div>
-        <div class="heading-note"><p data-solo="Totals and averages over each player's games, or only the games on the civs you pick.">Team figures are the four players' totals per game. Player figures are totals and averages over each player's games, or only their flank or pocket games.</p></div>
       </div>
       <h3 class="table-title" data-teams>Teams</h3>
       <div class="table-shell team-shell" data-teams>
@@ -123,16 +122,13 @@
     </section>
 
     <section class="section" id="civs" aria-labelledby="civs-title">
-      <div class="two-column">
+      <div class="section-heading">
         <div>
           <p class="section-label">Civilizations</p>
-          <h2 id="civs-title">Who played what</h2>
-          <p class="heading-note">Picks, games won and units killed per civilization. With this few games a civ's record says more about who played it than about the civ.</p>
-        </div>
-        <div class="table-shell civ-shell">
-          <table class="civ-table" id="civ-table"><thead></thead><tbody></tbody></table>
+          <h2 id="civs-title">Picks and win rates</h2>
         </div>
       </div>
+      <figure class="civ-plot" id="civ-plot"><p class="loading">Loading…</p></figure>
     </section>
 
     <section class="section band" id="curves" aria-labelledby="curves-title">
