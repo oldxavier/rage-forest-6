@@ -22,7 +22,7 @@ fetch("data/stats.json", { cache: "no-cache" })
     categories();
     teamTable();
     playerTable();
-    civPlot();
+    civRows();
     curveSection();
     headToHead();
     stripes();
@@ -852,76 +852,40 @@ function teamTable() {
   sortable("team-table", cols, rows, "wins");
 }
 
-// Every civ by picks (across) and win rate (up), drawn with its emblem. Civs with the same picks AND
-// wins sit on the same spot, so they are drawn as one group there -- nudging them apart would invent a
-// difference -- and the line under the plot names everyone on the spot hovered, focused or tapped.
-function civPlot() {
-  const fig = document.getElementById("civ-plot");
-  const spots = new Map();
-  for (const c of D.civs) {
-    const k = `${c.picks}/${c.wins}`;
-    if (!spots.has(k)) spots.set(k, { picks: c.picks, wins: c.wins, civs: [] });
-    spots.get(k).civs.push(c.civ);
-  }
-  const pts = [...spots.values()];
-  pts.forEach((s) => s.civs.sort((a, b) => a.localeCompare(b)));
-  // A long event (many picks per civ) crowds the plot both ways: one pick further across and one win
-  // more up are only a few pixels apart. So it gets more height, the emblems shrink to the gap between
-  // neighbouring spots (12 to 20), and where spots sit tight across, a group stacks in a column.
-  const xMax = Math.max(...pts.map((s) => s.picks)) + 1;
-  const W = 760, H = xMax > 15 ? 640 : 440, L = 54, R = 24, T = 26, B = 56, pw = W - L - R, ph = H - T - B;
-  const x = (p) => L + (p / xMax) * pw;
-  const y = (rate) => T + (1 - (rate + 0.08) / 1.16) * ph;        // a little room above 100% and below 0%
-  const step = xMax <= 15 ? 1 : xMax <= 30 ? 2 : 5;
-  const gapX = pw / xMax, gapY = ph / 1.16 / Math.max(1, xMax - 1);   // one pick across; one win up, at the most picks
-  const E = Math.max(12, Math.min(20, Math.floor(Math.min(gapX, gapY) - 2))), GAP = 2;   // emblem size, space in a group
-  const tight = gapX < 2 * E + 6;
-  const pct = (s) => Math.round((100 * s.wins) / s.picks);
-  const says = (s) => `${s.civs.join(", ")}: ${s.picks} pick${s.picks === 1 ? "" : "s"}, ${s.wins} won (${pct(s)}%)`;
+// Every civ in a ranked row: how often it was picked, and its games won and lost. Rows instead of a
+// scatter plot, so every civ is named and nothing overlaps however long the event runs. Sorted by
+// picks, or by win rate (ties: the more picked first).
+const CIV_SORTS = [["picks", "Most picked"], ["rate", "Win rate"]];
+let civSort = "picks";
 
-  let svg = `<svg class="civ-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Civilizations by picks and win rate">
-    <defs><clipPath id="civ-round" clipPathUnits="objectBoundingBox"><circle cx=".5" cy=".5" r=".5"/></clipPath></defs>`;
-  for (const v of [0, 0.25, 0.5, 0.75, 1])
-    svg += `<line class="${v === 0.5 ? "civ-half" : "civ-grid"}" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/>
-      <text class="civ-tick" x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${v * 100}%</text>`;
-  for (let p = 0; p <= xMax; p += step)
-    svg += `<line class="civ-grid" x1="${x(p)}" x2="${x(p)}" y1="${T}" y2="${H - B}"/>
-      <text class="civ-tick" x="${x(p)}" y="${H - B + 18}" text-anchor="middle">${p}</text>`;
-  svg += `<text class="civ-axis" x="${L + pw / 2}" y="${H - 12}" text-anchor="middle">Times picked</text>
-    <text class="civ-axis" transform="translate(14 ${T + ph / 2}) rotate(-90)" text-anchor="middle">Win rate</text>`;
-  // the busiest spots last, so a small group is never hidden under a big one
-  const order = pts.map((s, i) => i).sort((a, b) => pts[a].civs.length - pts[b].civs.length);
-  for (const i of order) {
-    const s = pts[i], n = s.civs.length;
-    const cols = tight ? Math.ceil(n / 3) : Math.ceil(Math.sqrt(n)), rows = Math.ceil(n / cols);
-    const gw = cols * E + (cols - 1) * GAP, gh = rows * E + (rows - 1) * GAP;
-    const cx = x(s.picks), cy = y(s.wins / s.picks), x0 = cx - gw / 2, y0 = cy - gh / 2;
-    let g = `<g class="civ-pt" tabindex="0" role="button" data-i="${i}" aria-label="${esc(says(s))}"><title>${esc(says(s))}</title>`;
-    if (n > 1) g += `<rect class="civ-pt-bg" x="${x0 - 3}" y="${y0 - 3}" width="${gw + 6}" height="${gh + 6}" rx="${E / 2 + 3}"/>`;
-    s.civs.forEach((civ, j) => {
-      const ex = x0 + (j % cols) * (E + GAP), ey = y0 + Math.floor(j / cols) * (E + GAP);
-      const src = D.emblems[civ];
-      g += src
-        ? `<image href="${esc(src)}" x="${ex}" y="${ey}" width="${E}" height="${E}" clip-path="url(#civ-round)" preserveAspectRatio="xMidYMid slice"/>`
-        : `<circle class="civ-noemblem" cx="${ex + E / 2}" cy="${ey + E / 2}" r="${E / 2}"/><text class="civ-initials" x="${ex + E / 2}" y="${ey + E / 2 + E / 6}" font-size="${Math.round(E * 0.45)}" text-anchor="middle">${esc(civ.slice(0, 2))}</text>`;
-    });
-    svg += g + "</g>";
-  }
-  svg += "</svg>";
-  const hint = "Hover or tap a civ to see who is on that spot.";
-  fig.innerHTML = `${svg}<figcaption class="civ-caption" id="civ-caption">${hint}</figcaption>`;
-  const cap = document.getElementById("civ-caption");
-  const show = (e) => {
-    const g = e.target.closest && e.target.closest(".civ-pt");
-    if (!g) return;
-    fig.querySelectorAll(".civ-pt.on").forEach((x) => x.classList.remove("on"));
-    g.classList.add("on");
-    const s = pts[+g.dataset.i];
-    cap.innerHTML = `<span class="civ-caption-civs">${s.civs.map(civTag).join(" ")}</span> <span>${s.picks} pick${s.picks === 1 ? "" : "s"}, ${s.wins} won · <b>${pct(s)}%</b></span>`;
-  };
-  fig.addEventListener("pointerover", show);
-  fig.addEventListener("focusin", show);
-  fig.addEventListener("click", show);
+function civRows() {
+  const fig = document.getElementById("civ-plot");
+  const rate = (c) => c.wins / c.picks;
+  const rows = [...D.civs].sort(civSort === "rate"
+    ? (a, b) => rate(b) - rate(a) || b.picks - a.picks || a.civ.localeCompare(b.civ)
+    : (a, b) => b.picks - a.picks || rate(b) - rate(a) || a.civ.localeCompare(b.civ));
+  const most = Math.max(...D.civs.map((c) => c.picks));
+  const pct = (c) => Math.round(100 * rate(c));
+  const seg = `<div class="seg civ-sort" role="group" aria-label="Sort civs">${CIV_SORTS.map(([k, label]) =>
+    `<button type="button" data-sort="${k}" aria-pressed="${civSort === k}">${label}</button>`).join("")}</div>`;
+  const head = `<li class="civ-row civ-row-head" aria-hidden="true"><span></span><span>Picks</span><span>Won · lost</span><span>Win rate</span></li>`;
+  const body = rows.map((c) => {
+    const lost = c.picks - c.wins;
+    return `<li class="civ-row" title="${esc(`${c.civ}: ${c.picks} pick${c.picks === 1 ? "" : "s"}, ${c.wins} won, ${lost} lost`)}">
+      ${civTag(c.civ)}
+      <span class="civ-picks"><span class="civ-bar" style="width:${(100 * c.picks) / most}%"></span><b>${c.picks}</b></span>
+      <span class="civ-wl" aria-label="${c.wins} won, ${lost} lost"><span class="civ-won" style="width:${100 * rate(c)}%"></span></span>
+      <span class="civ-pct">${pct(c)}%</span>
+    </li>`;
+  }).join("");
+  fig.innerHTML = `${seg}<ol class="civ-rows">${head}${body}</ol>`;
+  fig.querySelector(".civ-sort").addEventListener("click", (e) => {
+    const btn = e.target.closest("button");
+    if (!btn || btn.dataset.sort === civSort) return;
+    civSort = btn.dataset.sort;
+    civRows();
+    fig.querySelector(`.civ-sort [data-sort="${civSort}"]`).focus();
+  });
 }
 
 // ---------------------------------------------------------------- over time
