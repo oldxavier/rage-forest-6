@@ -506,7 +506,7 @@ td.hot { color: var(--gold); }
 .civ-row-head span:last-child, .civ-pct { text-align: right; }
 .civ-row .civ { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .civ-picks { display: flex; align-items: center; gap: .4rem; }
-.civ-bar { height: .7rem; min-width: 2px; border-radius: 2px; background: var(--green); opacity: .75; }
+.civ-bar { height: .7rem; min-width: 2px; border-radius: 2px; background: var(--p-grey); opacity: .6; }
 .civ-picks b { font: 500 .8rem var(--mono); }
 .civ-wl { position: relative; height: .7rem; overflow: hidden; border-radius: 2px; background: var(--loss); opacity: .8; }
 .civ-wl::after { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; border-left: 1px solid var(--white); }
