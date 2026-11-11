@@ -506,7 +506,7 @@ td.hot { color: var(--gold); }
 .civ-pt:hover .civ-pt-bg, .civ-pt:focus-visible .civ-pt-bg, .civ-pt.on .civ-pt-bg { stroke: var(--green); stroke-width: 2; }
 .civ-pt.on image, .civ-pt:focus-visible image { filter: drop-shadow(0 0 1.5px var(--green)); }
 .civ-noemblem { fill: var(--green-soft); stroke: var(--line); }
-.civ-initials { fill: var(--ink); font: 9px var(--sans); }
+.civ-initials { fill: var(--ink); font-family: var(--sans); }
 .civ-caption { min-height: 2.6rem; margin-top: .6rem; color: var(--muted); font-size: .9rem; line-height: 1.6; }
 .civ-caption .civ { margin-right: .5rem; color: var(--ink); }
 .civ-caption b { color: var(--ink); }

@@ -865,12 +865,17 @@ function civPlot() {
   }
   const pts = [...spots.values()];
   pts.forEach((s) => s.civs.sort((a, b) => a.localeCompare(b)));
-  const W = 760, H = 440, L = 54, R = 24, T = 26, B = 56, pw = W - L - R, ph = H - T - B;
+  // A long event (many picks per civ) crowds the plot both ways: one pick further across and one win
+  // more up are only a few pixels apart. So it gets more height, the emblems shrink to the gap between
+  // neighbouring spots (12 to 20), and where spots sit tight across, a group stacks in a column.
   const xMax = Math.max(...pts.map((s) => s.picks)) + 1;
+  const W = 760, H = xMax > 15 ? 640 : 440, L = 54, R = 24, T = 26, B = 56, pw = W - L - R, ph = H - T - B;
   const x = (p) => L + (p / xMax) * pw;
   const y = (rate) => T + (1 - (rate + 0.08) / 1.16) * ph;        // a little room above 100% and below 0%
   const step = xMax <= 15 ? 1 : xMax <= 30 ? 2 : 5;
-  const E = 20, GAP = 2;                                         // emblem size and the space between, in a group
+  const gapX = pw / xMax, gapY = ph / 1.16 / Math.max(1, xMax - 1);   // one pick across; one win up, at the most picks
+  const E = Math.max(12, Math.min(20, Math.floor(Math.min(gapX, gapY) - 2))), GAP = 2;   // emblem size, space in a group
+  const tight = gapX < 2 * E + 6;
   const pct = (s) => Math.round((100 * s.wins) / s.picks);
   const says = (s) => `${s.civs.join(", ")}: ${s.picks} pick${s.picks === 1 ? "" : "s"}, ${s.wins} won (${pct(s)}%)`;
 
@@ -888,7 +893,7 @@ function civPlot() {
   const order = pts.map((s, i) => i).sort((a, b) => pts[a].civs.length - pts[b].civs.length);
   for (const i of order) {
     const s = pts[i], n = s.civs.length;
-    const cols = Math.ceil(Math.sqrt(n)), rows = Math.ceil(n / cols);
+    const cols = tight ? Math.ceil(n / 3) : Math.ceil(Math.sqrt(n)), rows = Math.ceil(n / cols);
     const gw = cols * E + (cols - 1) * GAP, gh = rows * E + (rows - 1) * GAP;
     const cx = x(s.picks), cy = y(s.wins / s.picks), x0 = cx - gw / 2, y0 = cy - gh / 2;
     let g = `<g class="civ-pt" tabindex="0" role="button" data-i="${i}" aria-label="${esc(says(s))}"><title>${esc(says(s))}</title>`;
@@ -898,7 +903,7 @@ function civPlot() {
       const src = D.emblems[civ];
       g += src
         ? `<image href="${esc(src)}" x="${ex}" y="${ey}" width="${E}" height="${E}" clip-path="url(#civ-round)" preserveAspectRatio="xMidYMid slice"/>`
-        : `<circle class="civ-noemblem" cx="${ex + E / 2}" cy="${ey + E / 2}" r="${E / 2}"/><text class="civ-initials" x="${ex + E / 2}" y="${ey + E / 2 + 3.5}" text-anchor="middle">${esc(civ.slice(0, 2))}</text>`;
+        : `<circle class="civ-noemblem" cx="${ex + E / 2}" cy="${ey + E / 2}" r="${E / 2}"/><text class="civ-initials" x="${ex + E / 2}" y="${ey + E / 2 + E / 6}" font-size="${Math.round(E * 0.45)}" text-anchor="middle">${esc(civ.slice(0, 2))}</text>`;
     });
     svg += g + "</g>";
   }
