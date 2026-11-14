@@ -94,6 +94,13 @@ function gameLabel(tag) {
   return g ? `${team(g.a)} v ${team(g.b)} G${g.n}` : tag;
 }
 
+// where in the event a game was played: the playoff stage's name, else its round (and group, if any)
+function gameStage(tag) {
+  const g = gamesById[tag];
+  if (!g) return "";
+  return g.stage || `Round ${g.round}${g.group ? ` · Group ${g.group}` : ""}`;
+}
+
 function links() {
   document.querySelectorAll("[data-link]").forEach((a) => {
     const href = D.meta[a.dataset.link];
@@ -418,7 +425,7 @@ function civsOf(b) {
 
 // a row: the name (with the civ beside it), then one short line each for the game and any detail
 function who(b, r) {
-  if (b.scope === "match") return { main: gameLabel(r.g), lines: [D.meta.solo ? sidesHtml(r.g) : esc(`Round ${gamesById[r.g].round} · Group ${gamesById[r.g].group}`)] };
+  if (b.scope === "match") return { main: gameLabel(r.g), lines: [D.meta.solo ? sidesHtml(r.g) : esc(gameStage(r.g))] };
   if (b.scope === "object")
     return { main: r.o, lines: [`${esc(player(r.p))} ${civTag(r.civ)}`, esc(gameLabel(r.g))] };
   if (b.scope === "player")
