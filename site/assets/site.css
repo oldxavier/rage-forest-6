@@ -424,6 +424,7 @@ details.minor > .board-grid { margin-top: .4rem; }
 .board li .who small { color: var(--muted); font-size: .72rem; font-weight: 400; }
 .board li .who .civ { display: inline; margin-left: .2rem; color: var(--muted); font-size: .74rem; font-weight: 400; white-space: nowrap; }
 .board li .who .emblem { margin-right: .25rem; vertical-align: -.2rem; }
+.board li .who .fish { margin-left: .2rem; font-size: .8rem; font-weight: 400; }
 .board li .val { color: var(--green); font: 500 .9rem var(--mono); text-align: right; white-space: nowrap; }
 .board li:first-child .val { font-size: 1.05rem; }
 /* the whole list, scrolling inside the card, so every card keeps its size */

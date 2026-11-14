@@ -10,7 +10,7 @@ fetch("data/stats.json", { cache: "no-cache" })
   .then((data) => {
     D = data;
     gamesById = Object.fromEntries(D.games.map((g) => [g.tag, g]));
-    PG = D.pg.map(([p, g, civ, role, w]) => ({ p, g, civ, role, w: !!w }));
+    PG = D.pg.map(([p, g, civ, role, w, fish]) => ({ p, g, civ, role, w: !!w, fish: !!fish }));
     D.boards.list.forEach((b) => { if (b.civs) cardCivs[b.id] = { mode: b.civs.mode, civs: new Set(b.civs.civs) }; });
     soloCopy();
     links();
@@ -430,7 +430,8 @@ function who(b, r) {
     return { main: r.o, lines: [`${esc(player(r.p))} ${civTag(r.civ)}`, esc(gameLabel(r.g))] };
   if (b.scope === "player")
     return { main: player(r.p), lines: [`${teamOf(r.p)}${r.n} game${r.n === 1 ? "" : "s"}`, r.d ? esc(r.d) : ""] };
-  return { main: player(r.p), civ: r.civ, lines: [esc(gameLabel(r.g)), r.d ? esc(r.d) : ""] };
+  // a timing card marks the games with a fish boom (10+ fishing ships before 30:00)
+  return { main: player(r.p), civ: r.civ, fish: b.cat === "timings" && b.id !== "fish40" && r.fish, lines: [esc(gameLabel(r.g)), r.d ? esc(r.d) : ""] };
 }
 
 const SCOPES = { game: "One game", player: "All games", object: "One unit or building, one game", match: "Whole game" };
@@ -517,7 +518,7 @@ function rowsHtml(b, rows, from, to) {
     const result = x.w === undefined ? "" : x.w ? "won" : "lost";
     out += `<li class="${result}">
       <span class="rank">${rank}</span>
-      <span class="who"><span class="main" title="${esc(w.main)}${aliasNote(x.p)}">${esc(w.main)}${w.civ ? ` ${civTag(w.civ)}` : ""}</span>${w.lines
+      <span class="who"><span class="main" title="${esc(w.main)}${aliasNote(x.p)}">${esc(w.main)}${w.civ ? ` ${civTag(w.civ)}` : ""}${w.fish ? ` <span class="fish" role="img" aria-label="fish boom">🐟</span>` : ""}</span>${w.lines
         .filter(Boolean)
         .map((l) => `<small>${l}</small>`)
         .join("")}</span>
